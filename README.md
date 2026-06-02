@@ -1,338 +1,717 @@
-# 🚀 Hermes Agent Automation Setup with Ngrok on Ubuntu Server
+# 🚀 Hermes Agent Automation with Ngrok Tunneling on Ubuntu Server
 
-## 📘 Overview
+> **Deploy Hermes Agent on your Ubuntu VM and make it accessible from anywhere on the internet using ngrok**
 
-This project sets up a complete **Hermes Agent** (LLM-powered automation) on an Ubuntu Minimal Server using **Docker Compose**. It integrates **Ngrok** tunneling and a smart **auto-update script** to maintain a working public URL for the Hermes web dashboard, while **preserving data** across updates.
+## 📘 Quick Overview
 
-**Pattern**: Identical deployment methodology to the [n8n-ngrok-automation](https://github.com/ahmed-el-mahdy/n8n-ngrok-automation) project—**same VM, different containers and ports**.
+This project automates the deployment of **Hermes Agent** (NousResearch's LLM orchestration platform) on an Ubuntu Minimal Server with **ngrok** tunneling, following the proven pattern from [n8n-ngrok-automation](https://github.com/ahmed-el-mahdy/n8n-ngrok-automation).
 
----
-
-## 🧩 Project Structure
-
-```
-/opt/hermes
-├── hermes_data/              # Persistent Hermes data & configurations
-├── .env                      # Environment variables (secured, chmod 600)
-├── .env.example              # Template for environment variables
-├── .gitignore                # Git ignore patterns
-├── docker-compose.yml        # Docker Compose configuration
-├── hermes-ngrok-deploy.sh    # Main deployment & setup script
-├── scripts/
-│   ├── start.sh              # Start Hermes + Ngrok
-│   ├── stop.sh               # Stop Hermes + Ngrok
-│   ├── status.sh             # Check status of all services
-│   ├── get-url.sh            # Get current Ngrok public URL
-│   ├── url-watcher.sh        # Auto-update script for Ngrok URL changes
-│   └── logs.sh               # View container logs
-├── systemd/
-│   └── hermes-url-watcher.service  # Systemd service for persistent URL monitoring
-└── docs/
-    ├── IMPLEMENTATION_PLAN.md       # Architecture & detailed setup guide
-    ├── DEPLOYMENT_GUIDE.md          # Step-by-step deployment instructions
-    └── TROUBLESHOOTING.md           # Common issues & solutions
-```
+**What you get:**
+- 🤖 **Hermes Agent** web dashboard accessible globally via HTTPS
+- 🔐 **ngrok Basic Auth** protection (auto-generated password)
+- 🔄 **URL Watcher** systemd service (tracks ngrok URL changes automatically)
+- 💾 **Persistent data** across container restarts and updates
+- ⚡ **Fully automated** deployment (one command, 5 minutes)
+- 🧠 **LLM-ready** for OpenRouter, Gemini, or any OpenAI-compatible API
 
 ---
 
-## ⚙️ Docker Services
+## ⚡ 5-Minute Quick Start
 
-### 1️⃣ **Hermes Agent**
-- **Container Name**: `hermes-agent`
-- **Image**: `nousresearch/hermes-agent:latest`
-- **Dashboard Port**: `9119` (Web GUI - tunneled via Ngrok)
-- **API Port**: `8642` (OpenAI-compatible API endpoint)
-- **Data Persistence**: `/opt/hermes/hermes_data/`
-- **Environment**: Loaded from `.env` file
+### Step 1: Prerequisites Check
 
-### 2️⃣ **Ngrok**
-- **Container Name**: `ngrok-hermes`
-- **Image**: `ngrok/ngrok:latest`
-- **Command**: Tunnels port 9119 (dashboard) to the internet
-- **Management API**: Port 4040 (used by URL watcher)
-- **Network**: `hermes_net` (shared with Hermes container)
-
----
-
-## 🔐 Environment Variables
-
-**File**: `.env` (auto-generated during setup, chmod 600)
+**On your Ubuntu machine:**
 
 ```bash
-# Ngrok Authentication
-NGROK_AUTHTOKEN=your_ngrok_auth_token_here
+# Update system
+sudo apt update && sudo apt upgrade -y
 
-# Optional: Static Ngrok Domain (paid plan)
-NGROK_DOMAIN=your-static-domain.ngrok-free.dev
+# Check you have internet and ~2GB disk space
+df -h
+free -h
 
-# Hermes Configuration
-HERMES_PORT=9119
-HERMES_API_PORT=8642
-
-# LLM Provider Configuration (configured after first access)
-# OPENROUTER_API_KEY=your_api_key_here
-# GEMINI_API_KEY=your_api_key_here
-# OPENAI_API_KEY=your_api_key_here (optional)
+# Verify basic tools exist
+which curl wget git
 ```
 
-> 🔒 Sensitive credentials are stored in `.env` (not committed to Git).
+### Step 2: Get ngrok Auth Token
 
----
+1. **Create free ngrok account:** https://ngrok.com/signup
+2. **Get your auth token:** https://dashboard.ngrok.com/get-started/your-authtoken
+3. **Copy the token** (looks like: `2bPxx_1Bq1234567890abcdefghijklmnopqrst`)
 
-## 🔄 Persistent Data
-
-- **`hermes_data/`** directory is mounted as a Docker volume
-- Stores all Hermes configurations, models, and data files
-- Safely rebuild or update containers without losing data
-- Location: `/opt/hermes/hermes_data/`
-
----
-
-## 🚀 Quick Start
-
-### Prerequisites
-- Ubuntu Minimal Server (20.04 LTS or newer)
-- Sudo access
-- Internet connection
-- Ngrok account (free tier acceptable)
-
-### Automated Deployment (Recommended)
+### Step 3: Deploy (One Command)
 
 ```bash
-# 1. Download the deployment script
+# Download the deployment script
 wget https://raw.githubusercontent.com/ahmed-el-mahdy/hermes-ngrok-automation/main/hermes-ngrok-deploy.sh
 
-# 2. Make it executable
+# Make it executable
 chmod +x hermes-ngrok-deploy.sh
 
-# 3. Run the setup
+# Run the deployment
 ./hermes-ngrok-deploy.sh
 ```
 
-The script will:
-- ✅ Check prerequisites (Docker, curl, jq, python3)
-- ✅ Install Docker & Docker Compose if needed
-- ✅ Create directory structure (`/opt/hermes`)
-- ✅ Generate `.env` with your Ngrok token
-- ✅ Create `docker-compose.yml`
-- ✅ Set up helper scripts
-- ✅ Configure systemd service for URL watcher
-- ✅ Pull container images
-- ✅ Start Hermes + Ngrok
-- ✅ Display your public Ngrok URL
+**When prompted:**
+- Paste your ngrok auth token
+- Press ENTER
+- Wait 3-5 minutes (script handles everything automatically)
+
+### Step 4: Access Hermes Dashboard
+
+When deployment finishes, you'll see:
+
+```
+╔══════════════════════════════════════════════════════════╗
+║          HERMES AGENT — DEPLOYMENT COMPLETE              ║
+╠══════════════════════════════════════════════════════════╣
+║  🌐  URL:       https://xyz123.ngrok-free.dev           ║
+║  🔑  Username:  hermes                                   ║
+║  🔑  Password:  a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6        ║
+║                                                          ║
+║  Credentials saved to: ~/hermes-ngrok/credentials.txt   ║
+╚══════════════════════════════════════════════════════════╝
+```
+
+1. **Open the URL** in your browser (from anywhere in the world!)
+2. **Enter credentials** when prompted (ngrok basic auth popup)
+3. **Hermes Dashboard appears** ✅
 
 ---
 
-## 🧰 Helper Scripts
+## 📋 What Gets Deployed
 
-All scripts are executable from `/opt/hermes/scripts/` or via main script:
+### Deployment Locations
 
-| Script | Usage | Purpose |
-|--------|-------|----------|
-| `start.sh` | `./start.sh` | Start Hermes + Ngrok containers |
-| `stop.sh` | `./stop.sh` | Stop all containers gracefully |
-| `status.sh` | `./status.sh` | Display container & network status |
-| `get-url.sh` | `./get-url.sh` | Print current public Ngrok URL |
-| `logs.sh` | `./logs.sh [hermes\|ngrok]` | View container logs (real-time) |
-| `url-watcher.sh` | Auto-run via systemd | Polls Ngrok API, updates on URL changes |
-| `hermes-ngrok-deploy.sh --url` | Check URL anytime | Get live Ngrok tunnel URL |
+```
+Ubuntu Home Directory (~)
+├── hermes-ngrok/                      # Project root
+│   ├── .env                           # Configuration (chmod 600, secrets)
+│   ├── docker-compose.yml             # Container orchestration
+│   ├── current-url.txt                # Current ngrok public URL
+│   ├── credentials.txt                # Dashboard credentials
+│   ├── logs/                          # Application logs
+│   │   └── url-watcher.log           # URL change history
+│   └── scripts/                       # Helper scripts
+│       ├── start.sh                  # Start all services
+│       ├── stop.sh                   # Stop all services
+│       ├── restart.sh                # Restart (data preserved)
+│       ├── status.sh                 # Check service status
+│       ├── get-url.sh                # Print current public URL
+│       ├── logs.sh                   # View container logs
+│       ├── update.sh                 # Update Hermes image
+│       ├── setup-wizard.sh           # Interactive setup
+│       └── url-watcher.sh            # URL tracking service
+│
+└── .hermes/                           # Persistent Hermes data
+    ├── config.yaml                   # Hermes configuration
+    ├── models/                       # Downloaded models
+    ├── memory/                       # Chat history & sessions
+    └── (other data)
+```
+
+### Docker Containers
+
+| Container | Port | Role |
+|-----------|------|------|
+| **hermes-agent** | 9119 (dashboard), 8642 (API) | LLM orchestration engine |
+| **hermes-ngrok** | 4040 (mgmt API) | HTTPS tunnel to internet |
+
+### Systemd Service
+
+- **Service Name:** `hermes-url-watcher`
+- **Purpose:** Polls ngrok API, detects URL changes, logs them
+- **Auto-starts:** On VM boot
+- **Status:** `sudo systemctl status hermes-url-watcher`
 
 ---
 
-## 🔄 URL Watcher (Auto-Update)
+## 🔧 What the Deployment Script Does
 
-**File**: `/opt/hermes/scripts/url-watcher.sh`
+The `hermes-ngrok-deploy.sh` script automates 10 steps:
 
-This script runs as a **systemd service** and:
+### ✅ Step 1: Check Prerequisites
+- Detects OS (Ubuntu 20.04 LTS+)
+- Checks for Docker, Python3, curl, jq, netcat, openssl
+- Installs missing dependencies via apt
 
-1. **Polls** `http://localhost:4040/api/tunnels` every 30 seconds
-2. **Detects** URL changes (happens when ngrok restarts on free tier)
-3. **Logs** every change with ISO8601 timestamp
-4. **Updates** `current-url.txt` with the live URL
-5. **Notifies** (optional) via Telegram webhook when URL changes
+### ✅ Step 2: Install Docker (if needed)
+- Installs Docker Engine + Compose v2
+- Adds current user to `docker` group
+- Starts Docker daemon
+- (May require running `newgrp docker` after)
 
-**View logs**:
+### ✅ Step 3: Collect Configuration
+- **Prompts you for:** ngrok Auth Token
+- **Auto-generates:** Dashboard password (24-char hex)
+- **Auto-generates:** API server key (48-char hex)
+- **Saves to:** `credentials.txt` (chmod 600)
+
+### ✅ Step 4: Create Directory Structure
+```
+~/hermes-ngrok/          # Project root
+~/.hermes/               # Persistent data (chmod 700)
+~/hermes-ngrok/scripts/  # Helper scripts
+~/hermes-ngrok/logs/     # Log files
+```
+
+### ✅ Step 5: Generate Configuration Files
+- **`.env`** — Environment variables (chmod 600, not in Git)
+- **`docker-compose.yml`** — Two-container setup
+- **`.gitignore`** — Prevents secret commits
+- **`credentials.txt`** — Dashboard login info (chmod 600)
+
+### ✅ Step 6: Generate Helper Scripts
+Creates executable scripts in `~/hermes-ngrok/scripts/`:
+- `start.sh`, `stop.sh`, `restart.sh`
+- `status.sh`, `get-url.sh`, `logs.sh`
+- `update.sh`, `setup-wizard.sh`
+- `url-watcher.sh`
+
+### ✅ Step 7: Create URL Watcher Script
+- Polls `http://localhost:4040/api/tunnels` every 30 seconds
+- Detects URL changes (free ngrok changes on restart)
+- Logs changes with timestamps
+- Updates `current-url.txt`
+
+### ✅ Step 8: Install systemd Service
+- Registers `hermes-url-watcher.service`
+- Auto-starts on VM boot
+- Restarts on failure
+- Logs to systemd journal
+
+### ✅ Step 9: Pull Docker Images
+- Downloads `nousresearch/hermes-agent:latest` (~1-2 GB)
+- Downloads `ngrok/ngrok:latest` (~50 MB)
+- (Takes 2-5 minutes depending on internet)
+
+### ✅ Step 10: Start Services
+- Runs `docker compose up -d`
+- Waits for containers to respond
+- Starts URL watcher service
+- Displays final access information
+
+---
+
+## 🎮 Daily Operations
+
+### Get Current Public URL
+
+**Free ngrok plan = random URL on each restart**
+
 ```bash
+# Fastest way
+bash ~/hermes-ngrok/scripts/get-url.sh
+
+# Or read the file directly
+cat ~/hermes-ngrok/current-url.txt
+
+# Or check the logs
+tail ~/hermes-ngrok/logs/url-watcher.log
+```
+
+### Check Service Status
+
+```bash
+bash ~/hermes-ngrok/scripts/status.sh
+```
+
+Shows:
+- Container status (running/stopped)
+- Current ngrok URL
+- URL watcher service status
+- Last 25 lines of Hermes logs
+
+### Stop All Services (Data Preserved)
+
+```bash
+bash ~/hermes-ngrok/scripts/stop.sh
+```
+
+Your Hermes data remains in `~/.hermes/`. Start again anytime with `start.sh`.
+
+### Restart Services
+
+```bash
+bash ~/hermes-ngrok/scripts/restart.sh
+```
+
+Useful after changing LLM API keys in `.env`.
+
+### View Real-Time Logs
+
+```bash
+# All containers
+docker compose -f ~/hermes-ngrok/docker-compose.yml logs -f
+
+# Just Hermes
+docker logs -f hermes-agent
+
+# Just ngrok
+docker logs -f hermes-ngrok
+
+# URL watcher service
 sudo journalctl -u hermes-url-watcher.service -f
 ```
 
-**Manual trigger**:
+---
+
+## 🧠 Configure LLM Provider
+
+### Option A: Via Web Portal (Recommended)
+
+1. **Get Free API Key:**
+   - **OpenRouter:** https://openrouter.ai/keys (recommended, free credits)
+   - **Gemini:** https://aistudio.google.com/app/apikey (free tier)
+   - **OpenAI:** https://platform.openai.com/api-keys (paid)
+
+2. **Access Hermes Dashboard:**
+   - Open the ngrok URL from deployment output
+   - Log in: `hermes` / (password from credentials.txt)
+
+3. **Add API Key:**
+   - Navigate to **Settings** → **API Keys**
+   - Paste your API key
+   - Save
+
+4. **Test:**
+   - Select a model from dropdown
+   - Type a message
+   - Submit
+
+### Option B: Via Environment File
+
+1. **Edit `.env`:**
+   ```bash
+   nano ~/hermes-ngrok/.env
+   ```
+
+2. **Add API key:**
+   ```bash
+   # Find this section and uncomment:
+   OPENROUTER_API_KEY=sk-or-v1-xxxxx
+   ```
+
+3. **Restart:**
+   ```bash
+   bash ~/hermes-ngrok/scripts/restart.sh
+   ```
+
+4. **Verify:** Refresh browser, test a prompt
+
+---
+
+## 📂 File Structure Explained
+
+| File/Directory | Purpose | Committed to Git? |
+|---|---|---|
+| `.env` | Secrets (ngrok token, API keys) | ❌ No (chmod 600) |
+| `credentials.txt` | Dashboard login info | ❌ No (chmod 600) |
+| `.env.example` | Template for `.env` | ✅ Yes |
+| `docker-compose.yml` | Container config | ✅ Yes |
+| `hermes-ngrok-deploy.sh` | Main deployment script | ✅ Yes |
+| `scripts/` | Helper bash scripts | ✅ Yes |
+| `docs/` | Implementation, deployment, troubleshooting | ✅ Yes |
+| `.gitignore` | Prevents secret commits | ✅ Yes |
+| `README.md` | This file | ✅ Yes |
+| `~/.hermes/` | **All Hermes data** (config, models, memory) | ❌ No (local) |
+
+---
+
+## 🔐 Security Model
+
+### Layers of Protection
+
+```
+Internet User
+    ↓
+ngrok HTTPS/TLS encryption
+    ↓
+ngrok Basic Auth Challenge (username + 24-char password)
+    ↓
+Hermes Dashboard (running internally in insecure mode)
+    ↓
+Access to LLM features, chat history, configurations
+```
+
+### Why This is Secure
+
+1. **External Gate:** ngrok's basic auth requires username + password
+2. **Transport Security:** HTTPS/TLS encryption (ngrok terminates)
+3. **Strong Credentials:** 24-character hex password (96 bits entropy)
+4. **Local Data:** All Hermes data stays on your Ubuntu VM
+5. **Secrets Not in Git:** `.env` and `credentials.txt` ignored
+
+### What's NOT Protected Yet (Optional Additions)
+
+- No rate limiting on login attempts (ngrok handles this)
+- No 2FA (can add later via Hermes OAuth)
+- No reverse proxy (Nginx optional)
+- Public ngrok URL can be enumerated (free tier limitation)
+
+**Recommendation:** This setup is secure for personal/internal use. For production internet-facing deployments:
+- Upgrade to paid ngrok (static domain, IP allowlist)
+- Add Hermes OAuth
+- Add reverse proxy (Nginx) with rate limiting
+
+---
+
+## 🆘 Troubleshooting
+
+### "Port 9119 is already in use"
+
 ```bash
-./scripts/url-watcher.sh
+# Find what's using it
+sudo lsof -i :9119
+
+# Kill the process
+sudo kill -9 <PID>
+
+# Or stop & restart
+bash ~/hermes-ngrok/scripts/stop.sh
+sleep 3
+bash ~/hermes-ngrok/scripts/start.sh
 ```
 
----
-
-## 🌐 Accessing Hermes from the Internet
-
-### Step 1: Get Your Public URL
-```bash
-./scripts/get-url.sh
-# Output: https://abc123.ngrok-free.dev
-```
-
-### Step 2: Open in Browser
-Visit the URL in any web browser from anywhere in the world:
-```
-https://abc123.ngrok-free.dev
-```
-
-### Step 3: Configure LLM Providers
-After accessing the dashboard, configure your LLM provider:
-- **OpenRouter** (recommended for free tier access)
-- **Gemini** (Google's free tier)
-- **OpenAI** (if you have API key)
-
----
-
-## 📋 Co-Deployment with n8n (Same VM)
-
-Both **n8n** and **Hermes** run on the same Ubuntu VM:
-
-```
-┌─────────────────────────────────────────────────┐
-│         Ubuntu Minimal Server (VM)              │
-├─────────────────────────────────────────────────┤
-│  Docker Daemon                                  │
-├─────────────────────────────────────────────────┤
-│ n8n Stack                  Hermes Stack         │
-│ ├─ n8n (port 5678)        ├─ Hermes (9119)    │
-│ ├─ Nginx (80, 443)        ├─ Ngrok (4040)     │
-│ └─ Ngrok (4040)           └─ URL Watcher      │
-│    └─ URL Watcher              (systemd)      │
-│       (systemd)                                 │
-├─────────────────────────────────────────────────┤
-│ Shared: Docker network, same Ngrok account     │
-│ Isolated: Separate tunnels, separate data      │
-└─────────────────────────────────────────────────┘
-```
-
-**Ngrok Setup for Both**:
-- **n8n tunnel**: `ngrok http n8n:5678` → separate public URL
-- **Hermes tunnel**: `ngrok http hermes-agent:9119` → separate public URL
-- **Same auth token**: One Ngrok account, multiple tunnels allowed
-
----
-
-## 🔐 Security Notes
-
-1. **`.env` file**: Contains secrets (chmod 600) — never commit to Git
-2. **Ngrok URL**: Public — anyone can access; add auth layer later if needed
-3. **Hermes initial access**: No login required on first access (can add OAuth later)
-4. **Firewall**: VM firewall can restrict ports; Ngrok provides encrypted tunnel
-5. **Data privacy**: All Hermes data stored locally in `/opt/hermes/hermes_data/`
-
----
-
-## 📦 Commands Cheat Sheet
+### "Docker daemon is not running"
 
 ```bash
-# Deploy & Start
-./hermes-ngrok-deploy.sh
-
-# Stop all services
-cd /opt/hermes && ./scripts/stop.sh
-
-# Start services
-cd /opt/hermes && ./scripts/start.sh
-
-# Check current status
-cd /opt/hermes && ./scripts/status.sh
-
-# Get public URL
-cd /opt/hermes && ./scripts/get-url.sh
-
-# View Hermes logs
-cd /opt/hermes && ./scripts/logs.sh hermes
-
-# View Ngrok logs
-cd /opt/hermes && ./scripts/logs.sh ngrok
-
-# View URL watcher logs
-sudo journalctl -u hermes-url-watcher.service -f
-
-# Check Docker compose status
-cd /opt/hermes && docker compose ps
-
-# Restart a specific container
-cd /opt/hermes && docker compose restart hermes-agent
-
-# View ngrok tunnels via API
-curl -s http://localhost:4040/api/tunnels | jq '.tunnels'
-
-# Manually trigger URL update
-cd /opt/hermes && ./scripts/url-watcher.sh
+sudo systemctl start docker
+sudo systemctl status docker
 ```
+
+### "ngrok tunnel not establishing"
+
+```bash
+# Check ngrok logs
+docker logs hermes-ngrok | tail -20
+
+# Verify auth token is correct
+grep NGROK_AUTHTOKEN ~/hermes-ngrok/.env
+```
+
+### "Can't log in to dashboard"
+
+```bash
+# Get credentials
+cat ~/hermes-ngrok/credentials.txt
+
+# Or re-run get-url script
+bash ~/hermes-ngrok/scripts/get-url.sh
+
+# Username is always: hermes
+```
+
+### "Dashboard is slow / API hanging"
+
+```bash
+# Check resources
+free -h  # RAM
+df -h    # Disk
+top      # CPU
+
+# Check if API key is configured
+grep -E '^(OPENROUTER|GOOGLE|OPENAI)' ~/hermes-ngrok/.env | head -3
+```
+
+**For more help:** See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) (when created)
 
 ---
 
 ## 📚 Documentation
 
-1. **[IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)** — Architecture, deployment strategy, and design decisions
-2. **[DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md)** — Step-by-step deployment instructions with screenshots
-3. **[TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** — Common issues, debugging, and solutions
+1. **[IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)**
+   - Architecture overview
+   - Security model
+   - Component design
+   - LLM integration strategy
+
+2. **[DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md)**
+   - Step-by-step walkthrough
+   - Screenshots & examples
+   - Configuration methods
+   - Daily operations
+
+3. **[.env.example](.env.example)**
+   - Complete configuration template
+   - All available options
+   - Comments explaining each setting
 
 ---
 
-## 🔗 Architecture Comparison
+## 🎯 Key Commands Reference
 
-| Component | n8n Project | Hermes Project | Notes |
-|-----------|-----------|---|---|
-| Container | n8nio/n8n:latest | nousresearch/hermes-agent:latest | Different LLM platforms |
-| Main Port | 5678 | 9119 (Dashboard) | Different dashboard ports |
-| API Port | Internal API | 8642 (OpenAI-compatible) | Hermes has external API |
-| Ngrok Tunnel | Port 5678 → Public | Port 9119 → Public | Same pattern, different targets |
-| Data Volume | `/opt/n8n/n8n_data/` | `/opt/hermes/hermes_data/` | Both persistent |
-| URL Watcher | Restarts n8n container | Logs URL only (no restart needed) | Different injection models |
-| Network | n8n_net | hermes_net | Isolated networks |
+```bash
+# ═══════════════════════════════════════════════════════════
+# DEPLOYMENT & SETUP
+# ═══════════════════════════════════════════════════════════
+wget https://raw.githubusercontent.com/ahmed-el-mahdy/hermes-ngrok-automation/main/hermes-ngrok-deploy.sh
+chmod +x hermes-ngrok-deploy.sh
+./hermes-ngrok-deploy.sh
+
+# ═══════════════════════════════════════════════════════════
+# SERVICE CONTROL
+# ═══════════════════════════════════════════════════════════
+bash ~/hermes-ngrok/scripts/start.sh      # Start all services
+bash ~/hermes-ngrok/scripts/stop.sh       # Stop all services
+bash ~/hermes-ngrok/scripts/restart.sh    # Restart (data preserved)
+bash ~/hermes-ngrok/scripts/status.sh     # Full status report
+
+# ═══════════════════════════════════════════════════════════
+# ACCESS & CONNECTIVITY
+# ═══════════════════════════════════════════════════════════
+bash ~/hermes-ngrok/scripts/get-url.sh         # Get current public URL
+cat ~/hermes-ngrok/current-url.txt             # Read URL from file
+cat ~/hermes-ngrok/credentials.txt             # View login credentials
+
+# ═══════════════════════════════════════════════════════════
+# MONITORING & DEBUGGING
+# ═══════════════════════════════════════════════════════════
+bash ~/hermes-ngrok/scripts/logs.sh hermes     # View Hermes logs
+bash ~/hermes-ngrok/scripts/logs.sh ngrok      # View ngrok logs
+docker compose -f ~/hermes-ngrok/docker-compose.yml ps   # Container status
+sudo journalctl -u hermes-url-watcher.service -f         # URL watcher logs
+
+# ═══════════════════════════════════════════════════════════
+# MAINTENANCE & UPDATES
+# ═══════════════════════════════════════════════════════════
+bash ~/hermes-ngrok/scripts/update.sh                     # Update Hermes image
+bash ~/hermes-ngrok/scripts/setup-wizard.sh               # Interactive setup
+cd ~/hermes-ngrok && docker compose ps                    # Raw docker status
+
+# ═══════════════════════════════════════════════════════════
+# BACKUP & RESTORE
+# ═══════════════════════════════════════════════════════════
+tar czf ~/hermes-backup-$(date +%s).tar.gz ~/.hermes/     # Backup data
+cd ~ && tar xzf hermes-backup-XXXX.tar.gz                # Restore data
+bash ~/hermes-ngrok/scripts/restart.sh                    # Restart after restore
+
+# ═══════════════════════════════════════════════════════════
+# UNINSTALL (preserves ~/.hermes data)
+# ═══════════════════════════════════════════════════════════
+./hermes-ngrok-deploy.sh --uninstall
+```
 
 ---
 
-## 🕒 Development Timeline
+## 🌐 Accessing from Different Devices
 
-| Phase | Status | Description |
-|-------|--------|-------------|
-| Architecture Design | ✅ Complete | Modeled after n8n-ngrok-automation |
-| Docker Setup | ✅ Complete | docker-compose.yml configured |
-| Deployment Script | ✅ Complete | Automated setup & initialization |
-| Helper Scripts | ✅ Complete | start, stop, status, get-url, logs |
-| URL Watcher | ✅ Complete | Auto-detect changes, log updates |
-| Systemd Integration | ✅ Complete | URL watcher runs as service |
-| Documentation | ✅ Complete | Implementation, deployment, troubleshooting |
+**Hermes is accessible from:**
+- ✅ Your Ubuntu VM (localhost:9119)
+- ✅ Same network as VM (VM's IP:9119)
+- ✅ **Anywhere on the internet** (ngrok public URL)
+- ✅ Mobile phones, tablets, other computers
+- ✅ Different countries/regions
+
+**Just use the ngrok URL:**
+```
+https://your-random-url.ngrok-free.dev
+```
+
+No port forwarding, no firewall configuration, no static IP needed!
 
 ---
 
-## 🌍 Author & Support
+## 🔄 Data Persistence & Disaster Recovery
 
-**Project**: Hermes Agent + Ngrok Automation  
-**Inspired by**: [n8n-ngrok-automation](https://github.com/ahmed-el-mahdy/n8n-ngrok-automation)  
-**Created by**: Ahmed El-Mahdy  
-**Role**: Senior System Admin | DevOps Engineer  
+### Your Data is Safe
 
-For issues, questions, or improvements:
-1. Check [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
-2. Review logs: `journalctl -u hermes-url-watcher.service -f`
-3. Test manually: `./scripts/get-url.sh`
-4. Open a GitHub Issue with logs attached
+```bash
+# Hermes data is stored here (survives everything):
+~/.hermes/
+
+# This directory is:
+✅ Mounted as Docker volume
+✅ Survives container restarts
+✅ Survives docker compose down/up
+✅ Survives image updates
+✅ Survives VM reboots
+❌ Only deleted if you manually delete ~/.hermes/
+```
+
+### Backup Your Data
+
+```bash
+# Create timestamped backup
+tar czf ~/hermes-backup-$(date +%Y%m%d-%H%M%S).tar.gz ~/.hermes/
+
+# Restore from backup
+cd ~ && tar xzf hermes-backup-20260602-150000.tar.gz
+bash ~/hermes-ngrok/scripts/restart.sh
+```
+
+### Uninstall (Keep Data)
+
+```bash
+# Remove containers & project files, but keep ~/.hermes/
+./hermes-ngrok-deploy.sh --uninstall
+
+# Your data is preserved! Can reinstall anytime
+```
+
+---
+
+## 🏗️ Architecture Overview
+
+```
+┌────────────────────────────────────────────────────┐
+│           Ubuntu Minimal Server (VM)               │
+│                    NAT Mode                         │
+│                                                    │
+│  ┌──────────────────────────────────────────────┐ │
+│  │          Docker Network: hermes-net          │ │
+│  │                                              │ │
+│  │  ┌──────────────────┐  ┌────────────────┐  │ │
+│  │  │ hermes-agent     │  │  hermes-ngrok  │  │ │
+│  │  │ (Port 9119)      │◄─┤  (ngrok tunnel)│  │ │
+│  │  │ (Port 8642 API)  │  │  (Port 4040)   │  │ │
+│  │  │                  │  │                │  │ │
+│  │  │ Dashboard +      │  │ HTTPS to       │  │ │
+│  │  │ LLM Engine       │  │ Internet       │  │ │
+│  │  │                  │  │                │  │ │
+│  │  │ Data: ~/.hermes/ │  │                │  │ │
+│  │  └──────────────────┘  └────────────────┘  │ │
+│  │                                              │ │
+│  │  URL Watcher Service (systemd)              │ │
+│  │  └─ Polls ngrok API every 30s               │ │
+│  │  └─ Detects & logs URL changes              │ │
+│  └──────────────────────────────────────────────┘ │
+│                                                    │
+│  ↕ (outbound HTTPS only via ngrok)               │
+└────────────────────────────────────────────────────┘
+        ↓
+┌────────────────────────────────────────────────────┐
+│            Internet (ngrok Infrastructure)         │
+│                                                    │
+│  ngrok Basic Auth Gate                           │
+│  ├─ Username: hermes                            │
+│  └─ Password: (24-char auto-generated)         │
+│                    ↓                              │
+│  ngrok HTTPS Tunnel                             │
+│  └─ https://your-random-url.ngrok-free.dev     │
+│                    ↓                              │
+│  Public Users Worldwide                          │
+└────────────────────────────────────────────────────┘
+```
+
+---
+
+## 🎓 Learning Resources
+
+- **Hermes Agent:** https://github.com/NousResearch/Hermes
+- **ngrok Documentation:** https://ngrok.com/docs/
+- **Docker Compose:** https://docs.docker.com/compose/
+- **OpenRouter API:** https://openrouter.ai/docs
+- **Google Gemini API:** https://ai.google.dev/
+
+---
+
+## ✅ Deployment Checklist
+
+Before you start:
+
+- [ ] Ubuntu 20.04 LTS or newer
+- [ ] ~2 GB free disk space
+- [ ] Internet connection
+- [ ] Sudo access
+- [ ] ngrok account created (free at https://ngrok.com/signup)
+- [ ] ngrok auth token copied
+
+After deployment:
+
+- [ ] Public URL accessible from browser
+- [ ] Can log in with hermes / password
+- [ ] Hermes dashboard loads
+- [ ] LLM provider API key obtained
+- [ ] API key added via portal or .env
+- [ ] Chat message sends successfully
+- [ ] ~/hermes-ngrok/ directory exists with scripts
+- [ ] ~/.hermes/ directory exists with Hermes data
+- [ ] systemd service is running: `sudo systemctl status hermes-url-watcher`
+
+---
+
+## 🚀 Next Steps
+
+1. **Deploy:** Run the one-command deployment script
+2. **Access:** Open the ngrok URL in your browser
+3. **Authenticate:** Use username/password from credentials.txt
+4. **Configure LLM:** Get a free API key (OpenRouter or Gemini)
+5. **Test:** Send a chat message through Hermes
+6. **Explore:** Check settings, configure models, test API endpoints
+
+---
+
+## 📞 Support & Issues
+
+If something doesn't work:
+
+1. **Check the logs:**
+   ```bash
+   bash ~/hermes-ngrok/scripts/status.sh
+   docker logs hermes-agent
+   docker logs hermes-ngrok
+   ```
+
+2. **Verify configuration:**
+   ```bash
+   cat ~/hermes-ngrok/.env
+   cat ~/hermes-ngrok/credentials.txt
+   ```
+
+3. **Test connectivity:**
+   ```bash
+   bash ~/hermes-ngrok/scripts/get-url.sh
+   curl -s http://localhost:4040/api/tunnels | jq
+   ```
+
+4. **Open a GitHub Issue:**
+   - Include error messages from logs
+   - Include OS and Docker versions
+   - Include output of `df -h` and `free -h`
+
+---
+
+## 📊 Specifications
+
+| Item | Specification |
+|------|---|
+| **OS Support** | Ubuntu 20.04 LTS+ (minimal install OK) |
+| **RAM Required** | 1 GB minimum (2 GB recommended) |
+| **Disk Required** | 2 GB free (+ space for Hermes models) |
+| **Deployment Time** | 3-5 minutes (depending on internet) |
+| **Hermes Dashboard** | Port 9119 (HTTP locally, HTTPS via ngrok) |
+| **Hermes API** | Port 8642 (OpenAI-compatible) |
+| **ngrok URL Type** | HTTPS encrypted (http://s to browser) |
+| **Auth Method** | ngrok Basic Auth (auto-generated password) |
+| **Data Persistence** | ~/.hermes/ (Docker volume) |
+| **Network Mode** | NAT (no port forwarding needed) |
+| **Cost** | Free (ngrok free tier) |
 
 ---
 
 ## 📄 License
 
-This project is licensed under the same terms as the original n8n-ngrok-automation project.
+This project is licensed under the same terms as the original [n8n-ngrok-automation](https://github.com/ahmed-el-mahdy/n8n-ngrok-automation) project.
 
 ---
 
-## 🚀 Next Steps After Deployment
+## 🙏 Credits
 
-1. ✅ Run deployment script → Get public URL
-2. ✅ Access Hermes dashboard via public URL
-3. ✅ Configure LLM provider (OpenRouter or Gemini)
-4. ✅ Test dashboard functionality
-5. ⚠️ (Optional) Add password/OAuth authentication
-6. ⚠️ (Optional) Configure Telegram notifications for URL changes
-7. ⚠️ (Optional) Set up custom domain (paid Ngrok plan)
+**Inspired by:** [n8n-ngrok-automation](https://github.com/ahmed-el-mahdy/n8n-ngrok-automation)  
+**Created by:** Ahmed El-Mahdy (Senior System Admin | DevOps Engineer)  
+**Project:** Hermes Agent + Ngrok Automation  
+
+**Key Technologies:**
+- 🤖 [Hermes Agent](https://github.com/NousResearch/Hermes) by NousResearch
+- 🌐 [ngrok](https://ngrok.com) for HTTPS tunneling
+- 🐳 [Docker](https://docker.com) for containerization
+- 🔄 [Docker Compose](https://docs.docker.com/compose/) for orchestration
+- 🐧 [Ubuntu](https://ubuntu.com) as base OS
 
 ---
 
-**Status**: Production-ready | Tested on Ubuntu 20.04 LTS
+**Status:** ✅ **Production Ready**  
+**Last Updated:** 2026-06-02  
+**Version:** 1.0
