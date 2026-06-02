@@ -700,7 +700,7 @@ This project is licensed under the same terms as the original [n8n-ngrok-automat
 ## 🙏 Credits
 
 **Inspired by:** [n8n-ngrok-automation](https://github.com/ahmed-el-mahdy/n8n-ngrok-automation)  
-**Created by:** Ahmed El-Mahdy (Senior System Admin | DevOps Engineer)  
+**Created by:** Ahmed El-Mahdy (Senior DevOps Engineer)  
 **Project:** Hermes Agent + Ngrok Automation  
 
 **Key Technologies:**
