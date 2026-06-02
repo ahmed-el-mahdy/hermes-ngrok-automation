@@ -1,0 +1,110 @@
+version: '3.9'
+
+services:
+  # ========================================
+  # 🤖 HERMES AGENT CONTAINER
+  # ========================================
+  hermes-agent:
+    image: nousresearch/hermes-agent:latest
+    container_name: hermes-agent
+    restart: unless-stopped
+    
+    # Expose Hermes dashboard and API ports
+    ports:
+      - "9119:9119"  # Dashboard Web GUI
+      - "8642:8642"  # OpenAI-compatible API endpoint
+    
+    # Load environment variables from .env file
+    env_file:
+      - .env
+    
+    # Environment variables (can override .env values)
+    environment:
+      # Hermes Configuration
+      - HERMES_PORT=${HERMES_PORT:-9119}
+      - HERMES_API_PORT=${HERMES_API_PORT:-8642}
+      - HERMES_BIND_ADDRESS=${HERMES_BIND_ADDRESS:-0.0.0.0}
+      
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      
+      # LLM Provider Keys (configured later via dashboard)
+      # - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      # - GEMINI_API_KEY=${GEMINI_API_KEY}
+      # - OPENAI_API_KEY=${OPENAI_API_KEY}
+      
+      # Networking
+      - DOCKER_NETWORK=${DOCKER_NETWORK:-hermes_net}
+    
+    # Persistent volume for Hermes data, models, configurations
+    volumes:
+      - ./hermes_data:/root/.hermes
+      - ./logs:/var/log/hermes
+    
+    # Connect to shared Docker network
+    networks:
+      - hermes_net
+    
+    # Health check (optional)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9119/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ========================================
+  # 🌐 NGROK TUNNEL CONTAINER
+  # ========================================
+  ngrok-hermes:
+    image: ngrok/ngrok:latest
+    container_name: ngrok-hermes
+    restart: unless-stopped
+    
+    # Tunnel Hermes dashboard (port 9119) to the internet
+    # Exposes Ngrok Management API on port 4040 for URL polling
+    command: >
+      http hermes-agent:9119
+      --log=stdout
+      --region=eu
+    
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    
+    # Expose Ngrok Management API for URL watcher script
+    ports:
+      - "4040:4040"
+    
+    # Depends on Hermes being up first
+    depends_on:
+      - hermes-agent
+    
+    # Connect to shared Docker network
+    networks:
+      - hermes_net
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4040/api/tunnels"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+# ========================================
+# 🔗 SHARED DOCKER NETWORK
+# ========================================
+# All containers communicate via this bridge network
+networks:
+  hermes_net:
+    driver: bridge
+    name: ${DOCKER_NETWORK:-hermes_net}
+
+# ========================================
+# 💾 VOLUMES
+# ========================================
+# These are referenced by the containers above
+# Persistent storage for Hermes data
+volumes:
+  hermes_data:
+    driver: local

@@ -1,0 +1,64 @@
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.crt
+secrets/
+
+# Data & Persistence
+hermes_data/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+update_hermes.log
+url-watcher.log
+current-url.txt
+
+# Docker & Compose
+.dockerignore
+docker-compose.override.yml
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Backups & Temporary Files
+*.bak
+*.backup
+*.tmp
+tmp/
+temp/
+
+# OS Files
+.AppleDouble
+.LSOverride
+Thumbs.db
+desktop.ini
+
+# Python (if used)
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+venv/
+env/
+
+# Node (if used)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Cert & SSL
+certs/
+*.pem
+*.csr
+
+# Logs directory
+logs/
