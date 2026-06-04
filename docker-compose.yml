@@ -25,29 +25,34 @@ services:
     networks:
       - hermes_net
 
-  hermes-dashboard-gui:
-    image: nginx:1.27-alpine
-    container_name: hermes-dashboard-gui
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: hermes-open-webui
     restart: unless-stopped
     ports:
-      - "127.0.0.1:${DASHBOARD_GUI_PORT:-8088}:${DASHBOARD_GUI_PORT:-8088}"
+      - "127.0.0.1:${OPEN_WEBUI_PORT:-3000}:8080"
     env_file:
       - .env
     environment:
-      DASHBOARD_GUI_PORT: "${DASHBOARD_GUI_PORT:-8088}"
-      HERMES_DASHBOARD_URL: "http://hermes-agent:${HERMES_DASHBOARD_PORT:-9119}"
-      HERMES_API_URL: "http://hermes-agent:${HERMES_API_PORT:-8642}"
-      API_SERVER_KEY: "${API_SERVER_KEY}"
+      WEBUI_NAME: "${OPEN_WEBUI_NAME:-Hermes Open WebUI}"
+      WEBUI_SECRET_KEY: "${OPEN_WEBUI_SECRET_KEY}"
+      WEBUI_URL: "${OPEN_WEBUI_PUBLIC_URL:-}"
+      WEBUI_ADMIN_EMAIL: "${OPEN_WEBUI_ADMIN_EMAIL:-admin@hermes.local}"
+      WEBUI_ADMIN_PASSWORD: "${OPEN_WEBUI_ADMIN_PASSWORD}"
+      ENABLE_SIGNUP: "false"
+      ENABLE_OPENAI_API: "true"
+      OPENAI_API_BASE_URL: "http://hermes-agent:${HERMES_API_PORT:-8642}/v1"
+      OPENAI_API_KEY: "${API_SERVER_KEY}"
+      DEFAULT_MODELS: "hermes-agent"
     volumes:
-      - ./dashboard-gui:/usr/share/nginx/html:ro
-      - ./dashboard-gui/nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - open-webui-data:/app/backend/data
     depends_on:
       - hermes-agent
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8088/healthz >/dev/null 2>&1"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/ >/dev/null 2>&1 || wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1"]
       interval: 20s
-      timeout: 5s
-      retries: 5
+      timeout: 10s
+      retries: 10
     networks:
       - hermes_net
 
@@ -57,7 +62,7 @@ services:
     restart: unless-stopped
     command:
       - http
-      - hermes-dashboard-gui:${DASHBOARD_GUI_PORT:-8088}
+      - open-webui:8080
       - --log=stdout
       - --region=eu
       - --basic-auth=${NGROK_AUTH_USER:-hermes}:${NGROK_AUTH_PASS}
@@ -66,9 +71,12 @@ services:
     ports:
       - "127.0.0.1:4040:4040"
     depends_on:
-      - hermes-dashboard-gui
+      - open-webui
     networks:
       - hermes_net
+
+volumes:
+  open-webui-data:
 
 networks:
   hermes_net:
