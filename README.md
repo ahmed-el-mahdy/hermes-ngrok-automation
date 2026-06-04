@@ -7,8 +7,9 @@
 This project automates the deployment of **Hermes Agent** (NousResearch's LLM orchestration platform) on an Ubuntu Minimal Server with **ngrok** tunneling, following the proven pattern from [n8n-ngrok-automation](https://github.com/ahmed-el-mahdy/n8n-ngrok-automation).
 
 **What you get:**
-- 🤖 **Hermes Agent** web dashboard accessible globally via HTTPS
-- 🔐 **ngrok Basic Auth** protection (auto-generated password)
+- **Open WebUI** accessible globally via HTTPS and prewired to Hermes Agent
+- **Hermes Agent** dashboard/API kept internal behind Open WebUI
+- 🔐 **Open WebUI account login** protection (no ngrok browser popup)
 - 🔄 **URL Watcher** systemd service (tracks ngrok URL changes automatically)
 - 💾 **Persistent data** across container restarts and updates
 - ⚡ **Fully automated** deployment (one command, 5 minutes)
@@ -26,7 +27,7 @@ This project automates the deployment of **Hermes Agent** (NousResearch's LLM or
 # Update system
 sudo apt update && sudo apt upgrade -y
 
-# Check you have internet and ~2GB disk space
+# Check you have internet and ~20GB free disk space for Docker images/data
 df -h
 free -h
 
@@ -58,7 +59,7 @@ chmod +x hermes-ngrok-deploy.sh
 - Press ENTER
 - Wait 3-5 minutes (script handles everything automatically)
 
-### Step 4: Access Hermes Dashboard
+### Step 4: Access Open WebUI
 
 When deployment finishes, you'll see:
 
@@ -67,16 +68,16 @@ When deployment finishes, you'll see:
 ║          HERMES AGENT — DEPLOYMENT COMPLETE              ║
 ╠══════════════════════════════════════════════════════════╣
 ║  🌐  URL:       https://xyz123.ngrok-free.dev           ║
-║  🔑  Username:  hermes                                   ║
-║  🔑  Password:  a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6        ║
+║  👤  Open WebUI email:  admin@hermes.local              ║
+║  🔑  Open WebUI pass:   auto-generated-password         ║
 ║                                                          ║
 ║  Credentials saved to: ~/hermes-ngrok/credentials.txt   ║
 ╚══════════════════════════════════════════════════════════╝
 ```
 
 1. **Open the URL** in your browser (from anywhere in the world!)
-2. **Enter credentials** when prompted (ngrok basic auth popup)
-3. **Hermes Dashboard appears** ✅
+2. **Sign in to Open WebUI** with the email/password from `credentials.txt`
+3. **Open WebUI appears** ✅
 
 ---
 
@@ -115,8 +116,9 @@ Ubuntu Home Directory (~)
 
 | Container | Port | Role |
 |-----------|------|------|
-| **hermes-agent** | 9119 (dashboard), 8642 (API) | LLM orchestration engine |
-| **hermes-ngrok** | 4040 (mgmt API) | HTTPS tunnel to internet |
+| **hermes-agent** | 9119 (dashboard), 8642 (API) | LLM orchestration engine, internal backend |
+| **hermes-open-webui** | 3000 -> 8080 | Prebuilt Open WebUI chat dashboard |
+| **hermes-ngrok** | 4040 (mgmt API) | HTTPS tunnel to Open WebUI |
 
 ### Systemd Service
 
@@ -144,7 +146,7 @@ The `hermes-ngrok-deploy.sh` script automates 10 steps:
 
 ### ✅ Step 3: Collect Configuration
 - **Prompts you for:** ngrok Auth Token
-- **Auto-generates:** Dashboard password (24-char hex)
+- **Auto-generates:** Open WebUI admin password (24-char hex)
 - **Auto-generates:** API server key (48-char hex)
 - **Saves to:** `credentials.txt` (chmod 600)
 
@@ -158,7 +160,7 @@ The `hermes-ngrok-deploy.sh` script automates 10 steps:
 
 ### ✅ Step 5: Generate Configuration Files
 - **`.env`** — Environment variables (chmod 600, not in Git)
-- **`docker-compose.yml`** — Two-container setup
+- **`docker-compose.yml`** — Three-container setup: Hermes, Open WebUI, ngrok
 - **`.gitignore`** — Prevents secret commits
 - **`credentials.txt`** — Dashboard login info (chmod 600)
 
@@ -182,8 +184,9 @@ Creates executable scripts in `~/hermes-ngrok/scripts/`:
 - Logs to systemd journal
 
 ### ✅ Step 9: Pull Docker Images
-- Downloads `nousresearch/hermes-agent:latest` (~1-2 GB)
-- Downloads `ngrok/ngrok:latest` (~50 MB)
+- Downloads `nousresearch/hermes-agent:latest`
+- Downloads `ghcr.io/open-webui/open-webui:main`
+- Downloads `ngrok/ngrok:latest`
 - (Takes 2-5 minutes depending on internet)
 
 ### ✅ Step 10: Start Services
@@ -266,7 +269,7 @@ sudo journalctl -u hermes-url-watcher.service -f
    - **Gemini:** https://aistudio.google.com/app/apikey (free tier)
    - **OpenAI:** https://platform.openai.com/api-keys (paid)
 
-2. **Access Hermes Dashboard:**
+2. **Access Open WebUI:**
    - Open the ngrok URL from deployment output
    - Log in: `hermes` / (password from credentials.txt)
 
@@ -328,16 +331,18 @@ Internet User
     ↓
 ngrok HTTPS/TLS encryption
     ↓
-ngrok Basic Auth Challenge (username + 24-char password)
+ngrok HTTPS tunnel (no browser auth popup)
     ↓
-Hermes Dashboard (running internally in insecure mode)
+Open WebUI (public dashboard)
+    ↓
+Hermes API (internal OpenAI-compatible backend)
     ↓
 Access to LLM features, chat history, configurations
 ```
 
 ### Why This is Secure
 
-1. **External Gate:** ngrok's basic auth requires username + password
+1. **External Access:** ngrok forwards HTTPS traffic to Open WebUI
 2. **Transport Security:** HTTPS/TLS encryption (ngrok terminates)
 3. **Strong Credentials:** 24-character hex password (96 bits entropy)
 4. **Local Data:** All Hermes data stays on your Ubuntu VM
@@ -498,36 +503,15 @@ bash ~/hermes-ngrok/scripts/restart.sh                    # Restart after restor
 ## 🌐 Accessing from Different Devices
 
 **Hermes is accessible from:**
-- ✅ Your Ubuntu VM (localhost:9119)
-- ✅ Same network as VM (VM's IP:9119)
-- ✅ **Anywhere on the internet** (ngrok public URL)
+- ✅ Your Ubuntu VM (localhost:3000)
+- ✅ Same network as VM through the chosen local bind policy
+- ✅ **Anywhere on the internet** (ngrok public URL to Open WebUI)
 - ✅ Mobile phones, tablets, other computers
 - ✅ Different countries/regions
 
 **Just use the ngrok URL:**
 ```
 https://your-random-url.ngrok-free.dev
-```
-
-No port forwarding, no firewall configuration, no static IP needed!
-
----
-
-## 🔄 Data Persistence & Disaster Recovery
-
-### Your Data is Safe
-
-```bash
-# Hermes data is stored here (survives everything):
-~/.hermes/
-
-# This directory is:
-✅ Mounted as Docker volume
-✅ Survives container restarts
-✅ Survives docker compose down/up
-✅ Survives image updates
-✅ Survives VM reboots
-❌ Only deleted if you manually delete ~/.hermes/
 ```
 
 ### Backup Your Data
@@ -554,46 +538,19 @@ bash ~/hermes-ngrok/scripts/restart.sh
 
 ## 🏗️ Architecture Overview
 
+Current public route:
+
+```text
+Internet browser
+  -> ngrok HTTPS tunnel
+  -> hermes-open-webui:8080
+  -> OpenAI-compatible backend
+  -> hermes-agent:8642/v1
+
+Native Hermes dashboard:
+  hermes-agent:9119 (internal/local only, not the ngrok target)
 ```
-┌────────────────────────────────────────────────────┐
-│           Ubuntu Minimal Server (VM)               │
-│                    NAT Mode                         │
-│                                                    │
-│  ┌──────────────────────────────────────────────┐ │
-│  │          Docker Network: hermes-net          │ │
-│  │                                              │ │
-│  │  ┌──────────────────┐  ┌────────────────┐  │ │
-│  │  │ hermes-agent     │  │  hermes-ngrok  │  │ │
-│  │  │ (Port 9119)      │◄─┤  (ngrok tunnel)│  │ │
-│  │  │ (Port 8642 API)  │  │  (Port 4040)   │  │ │
-│  │  │                  │  │                │  │ │
-│  │  │ Dashboard +      │  │ HTTPS to       │  │ │
-│  │  │ LLM Engine       │  │ Internet       │  │ │
-│  │  │                  │  │                │  │ │
-│  │  │ Data: ~/.hermes/ │  │                │  │ │
-│  │  └──────────────────┘  └────────────────┘  │ │
-│  │                                              │ │
-│  │  URL Watcher Service (systemd)              │ │
-│  │  └─ Polls ngrok API every 30s               │ │
-│  │  └─ Detects & logs URL changes              │ │
-│  └──────────────────────────────────────────────┘ │
-│                                                    │
-│  ↕ (outbound HTTPS only via ngrok)               │
-└────────────────────────────────────────────────────┘
-        ↓
-┌────────────────────────────────────────────────────┐
-│            Internet (ngrok Infrastructure)         │
-│                                                    │
-│  ngrok Basic Auth Gate                           │
-│  ├─ Username: hermes                            │
-│  └─ Password: (24-char auto-generated)         │
-│                    ↓                              │
-│  ngrok HTTPS Tunnel                             │
-│  └─ https://your-random-url.ngrok-free.dev     │
-│                    ↓                              │
-│  Public Users Worldwide                          │
-└────────────────────────────────────────────────────┘
-```
+
 
 ---
 
@@ -612,7 +569,7 @@ bash ~/hermes-ngrok/scripts/restart.sh
 Before you start:
 
 - [ ] Ubuntu 20.04 LTS or newer
-- [ ] ~2 GB free disk space
+- [ ] ~20 GB free disk space for Docker images and app data
 - [ ] Internet connection
 - [ ] Sudo access
 - [ ] ngrok account created (free at https://ngrok.com/signup)
@@ -622,7 +579,7 @@ After deployment:
 
 - [ ] Public URL accessible from browser
 - [ ] Can log in with hermes / password
-- [ ] Hermes dashboard loads
+- [ ] Open WebUI loads
 - [ ] LLM provider API key obtained
 - [ ] API key added via portal or .env
 - [ ] Chat message sends successfully
@@ -679,12 +636,12 @@ If something doesn't work:
 |------|---|
 | **OS Support** | Ubuntu 20.04 LTS+ (minimal install OK) |
 | **RAM Required** | 1 GB minimum (2 GB recommended) |
-| **Disk Required** | 2 GB free (+ space for Hermes models) |
+| **Disk Required** | 20 GB free recommended for Hermes, Open WebUI, and Docker data |
 | **Deployment Time** | 3-5 minutes (depending on internet) |
-| **Hermes Dashboard** | Port 9119 (HTTP locally, HTTPS via ngrok) |
+| **Open WebUI** | Port 3000 locally, HTTPS via ngrok |
 | **Hermes API** | Port 8642 (OpenAI-compatible) |
 | **ngrok URL Type** | HTTPS encrypted (http://s to browser) |
-| **Auth Method** | ngrok Basic Auth (auto-generated password) |
+| **Auth Method** | Open WebUI account login |
 | **Data Persistence** | ~/.hermes/ (Docker volume) |
 | **Network Mode** | NAT (no port forwarding needed) |
 | **Cost** | Free (ngrok free tier) |

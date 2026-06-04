@@ -6,18 +6,17 @@
 #  Confirmed settings:
 #    ✔  ngrok FREE plan  (random URL, watcher tracks changes automatically)
 #    ✔  VM in NAT mode   (ngrok handles outbound tunnel — no port-forward needed)
-#    ✔  ngrok Basic Auth (auto-generated password — protects the dashboard)
+#    ✔  Open WebUI authentication (no ngrok browser auth popup)
 #    ✔  LLM: OpenRouter + Google Gemini API (configure later via web portal)
-#    ✔  HERMES_DASHBOARD_INSECURE=1 (safe because ngrok basic-auth is the gate)
+#    ✔  Open WebUI prewired to Hermes' OpenAI-compatible API
 #
 #  Security model:
-#    Internet → ngrok basic-auth challenge → Hermes dashboard (port 9119)
-#    The dashboard runs in insecure mode INTERNALLY but is protected
-#    by ngrok's own authentication layer EXTERNALLY.
+#    Internet → ngrok HTTPS tunnel → Open WebUI (port 3000)
+#    Open WebUI connects internally to Hermes at hermes-agent:8642/v1.
 #
 #  Pattern mirrors n8n-ngrok-automation project:
-#    Two containers on shared bridge network  (hermes-net)
-#    ngrok sidecar tunnels dashboard port to internet
+#    Three containers on shared bridge network  (hermes-net)
+#    ngrok sidecar tunnels Open WebUI to internet
 #    URL watcher service tracks ngrok URL changes
 #
 #  Usage:
@@ -47,14 +46,13 @@ readonly NGROK_API="http://localhost:4040/api/tunnels"
 # Docker images
 readonly HERMES_IMAGE="nousresearch/hermes-agent:latest"
 readonly NGROK_IMAGE="ngrok/ngrok:latest"
+readonly OPEN_WEBUI_IMAGE="ghcr.io/open-webui/open-webui:main"
 
 # Ports
 readonly HERMES_DASHBOARD_PORT="9119"
 readonly HERMES_API_PORT="8642"
+readonly OPEN_WEBUI_PORT="3000"
 readonly NGROK_MGMT_PORT="4040"
-
-# Auth
-readonly NGROK_AUTH_USER="hermes"
 
 # ─────────────────────────────────────────────────────────────────
 #  COLORS
@@ -80,7 +78,7 @@ log_step()  { echo -e "\n${BOLD}${CYAN}━━━  $*  ━━━${RESET}"; }
 log_sep()   { echo -e "${DIM}──────────────────────────────────────────────────────${RESET}"; }
 
 banner() {
-  clear
+  clear 2>/dev/null || true
   echo -e "${CYAN}${BOLD}"
   cat <<'BANNER'
 
@@ -106,12 +104,45 @@ BANNER
 # ─────────────────────────────────────────────────────────────────
 command_exists() { command -v "$1" &>/dev/null; }
 
+sudo() {
+  if command sudo -n true 2>/dev/null; then
+    command sudo "$@"
+    return
+  fi
+
+  if [[ -n "${SUDO_PASSWORD:-}" ]]; then
+    printf '%s\n' "$SUDO_PASSWORD" | command sudo -S -v
+    command sudo "$@"
+    return
+  fi
+
+  command sudo "$@"
+}
+
 gen_password() {
   # 24-char hex — safe in all shell/YAML contexts, no special chars
   openssl rand -hex 12 2>/dev/null \
     || head -c 24 /dev/urandom | xxd -p 2>/dev/null \
     || cat /proc/sys/kernel/random/uuid 2>/dev/null | tr -d '-' | head -c 24 \
     || echo "changeme$(date +%s)"
+}
+
+get_env_value() {
+  local key="$1" file="${2:-$ENV_FILE}"
+  [[ -f "$file" ]] || return 0
+  grep -E "^${key}=" "$file" 2>/dev/null | tail -n 1 | cut -d= -f2-
+}
+
+write_optional_env() {
+  local key="$1" placeholder="$2" value
+  local preserved_var="PRESERVE_${key}"
+  value="${!preserved_var:-}"
+  [[ -n "${value:-}" ]] || value="$(get_env_value "$key" || true)"
+  if [[ -n "${value:-}" ]]; then
+    printf '%s=%s\n' "$key" "$value"
+  else
+    printf '# %s=%s\n' "$key" "$placeholder"
+  fi
 }
 
 get_ngrok_url() {
@@ -257,27 +288,43 @@ collect_config() {
     fi
   fi
 
-  # ── dashboard basic-auth credentials ──
-  # Re-use existing password if credentials file exists
-  if [[ -f "$CREDS_FILE" ]]; then
-    _existing_pass=$(grep '^Password:' "$CREDS_FILE" 2>/dev/null | awk '{print $2}' || true)
-    if [[ -n "${_existing_pass:-}" ]]; then
-      NGROK_AUTH_PASS="$_existing_pass"
-      log_ok "Reusing existing dashboard password from credentials.txt"
-    fi
+  API_SERVER_KEY="$(get_env_value API_SERVER_KEY || true)"
+  if [[ -n "${API_SERVER_KEY:-}" ]]; then
+    log_ok "Reusing existing Hermes API server key from .env"
+  else
+    log_info "Generating secure Hermes API server key..."
+    API_SERVER_KEY="$(gen_password)$(gen_password)"
+    log_ok "Hermes API server key generated"
   fi
 
-  if [[ -z "${NGROK_AUTH_PASS:-}" ]]; then
-    log_info "Generating secure ngrok basic-auth password..."
-    NGROK_AUTH_PASS=$(gen_password)
-    log_ok "Password generated (24-char hex — alphanumeric only)"
+  OPEN_WEBUI_ADMIN_EMAIL="$(get_env_value OPEN_WEBUI_ADMIN_EMAIL || true)"
+  [[ -n "${OPEN_WEBUI_ADMIN_EMAIL:-}" ]] || OPEN_WEBUI_ADMIN_EMAIL="admin@hermes.local"
+
+  OPEN_WEBUI_ADMIN_PASSWORD="$(get_env_value OPEN_WEBUI_ADMIN_PASSWORD || true)"
+  if [[ -n "${OPEN_WEBUI_ADMIN_PASSWORD:-}" ]]; then
+    log_ok "Reusing existing Open WebUI admin password from .env"
+  else
+    log_info "Generating Open WebUI admin password..."
+    OPEN_WEBUI_ADMIN_PASSWORD="$(gen_password)"
+    log_ok "Open WebUI admin password generated"
   fi
+
+  OPEN_WEBUI_SECRET_KEY="$(get_env_value OPEN_WEBUI_SECRET_KEY || true)"
+  if [[ -n "${OPEN_WEBUI_SECRET_KEY:-}" ]]; then
+    log_ok "Reusing existing Open WebUI secret key from .env"
+  else
+    OPEN_WEBUI_SECRET_KEY="$(gen_password)$(gen_password)"
+    log_ok "Open WebUI secret key generated"
+  fi
+
+  for key in OPENROUTER_API_KEY GOOGLE_API_KEY GEMINI_API_KEY ANTHROPIC_API_KEY OPENAI_API_KEY; do
+    printf -v "PRESERVE_${key}" '%s' "$(get_env_value "$key" || true)"
+  done
 
   echo ""
   log_ok "Config ready"
   log_info "ngrok token:        ${NGROK_AUTHTOKEN:0:8}****"
-  log_info "Dashboard user:     ${NGROK_AUTH_USER}"
-  log_info "Dashboard password: ${NGROK_AUTH_PASS}"
+  log_info "Open WebUI admin:   ${OPEN_WEBUI_ADMIN_EMAIL}"
 }
 
 # ─────────────────────────────────────────────────────────────────
@@ -287,7 +334,11 @@ create_directories() {
   log_step "Step 4/10 — Creating Directory Structure"
 
   mkdir -p "$PROJECT_DIR" "$SCRIPTS_DIR" "$LOGS_DIR" "$HERMES_DATA_DIR"
-  chmod 700 "$HERMES_DATA_DIR"   # only owner can read hermes data
+  chmod 700 "$HERMES_DATA_DIR" 2>/dev/null || sudo chmod 700 "$HERMES_DATA_DIR"
+  if [[ -d "$PROJECT_DIR/dashboard-gui" ]]; then
+    rm -rf "$PROJECT_DIR/dashboard-gui"
+    log_ok "Removed obsolete custom dashboard GUI directory"
+  fi
 
   log_ok "$PROJECT_DIR"
   log_ok "$HERMES_DATA_DIR  (chmod 700)"
@@ -311,30 +362,139 @@ generate_configs() {
 # ── ngrok ────────────────────────────────────────────────────────
 NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
 
-# ── ngrok Basic Auth (auto-generated — protects dashboard) ───────
-# This is the login for the Hermes web portal via ngrok URL
-NGROK_AUTH_USER=${NGROK_AUTH_USER}
-NGROK_AUTH_PASS=${NGROK_AUTH_PASS}
+# ── Service ports + Hermes Gateway API (preserved on redeploy) ───
+HERMES_DASHBOARD_PORT=${HERMES_DASHBOARD_PORT}
+HERMES_API_PORT=${HERMES_API_PORT}
+OPEN_WEBUI_PORT=${OPEN_WEBUI_PORT}
+API_SERVER_KEY=${API_SERVER_KEY}
 
-# ── Hermes Gateway API (auto-generated strong key) ───────────────
-API_SERVER_KEY=$(gen_password)$(gen_password)
+# ── Open WebUI (prebuilt dashboard) ──────────────────────────────
+OPEN_WEBUI_NAME=Hermes Open WebUI
+OPEN_WEBUI_ADMIN_EMAIL=${OPEN_WEBUI_ADMIN_EMAIL}
+OPEN_WEBUI_ADMIN_PASSWORD=${OPEN_WEBUI_ADMIN_PASSWORD}
+OPEN_WEBUI_SECRET_KEY=${OPEN_WEBUI_SECRET_KEY}
+OPEN_WEBUI_PUBLIC_URL=
 
 # ── LLM API Keys  (add after first web portal access) ────────────
 # Provider 1 — OpenRouter  (free tier available)
 # Get key → https://openrouter.ai/keys
-# OPENROUTER_API_KEY=sk-or-v1-
+$(write_optional_env OPENROUTER_API_KEY sk-or-v1-)
 
 # Provider 2 — Google Gemini  (free tier available)
 # Get key → https://aistudio.google.com/app/apikey
-# GOOGLE_API_KEY=AIza
+$(write_optional_env GOOGLE_API_KEY AIza)
+$(write_optional_env GEMINI_API_KEY AIza)
 
 # Provider 3 — Anthropic  (optional)
-# ANTHROPIC_API_KEY=sk-ant-
+$(write_optional_env ANTHROPIC_API_KEY sk-ant-)
 
 # Provider 4 — OpenAI  (optional)
-# OPENAI_API_KEY=sk-
+$(write_optional_env OPENAI_API_KEY sk-)
 EOF
   chmod 600 "$ENV_FILE"
+  log_ok ".env  ->  $ENV_FILE  (chmod 600)"
+
+  # docker-compose.yml
+  cat > "$COMPOSE_FILE" <<EOF
+services:
+  hermes-agent:
+    image: ${HERMES_IMAGE}
+    container_name: hermes-agent
+    restart: unless-stopped
+    command: gateway run
+    ports:
+      - "127.0.0.1:${HERMES_DASHBOARD_PORT}:${HERMES_DASHBOARD_PORT}"
+      - "127.0.0.1:${HERMES_API_PORT}:${HERMES_API_PORT}"
+    env_file:
+      - .env
+    environment:
+      HERMES_DASHBOARD: "1"
+      HERMES_DASHBOARD_HOST: "0.0.0.0"
+      HERMES_DASHBOARD_PORT: "${HERMES_DASHBOARD_PORT}"
+      HERMES_DASHBOARD_INSECURE: "1"
+      API_SERVER_ENABLED: "true"
+      API_SERVER_HOST: "0.0.0.0"
+      LOG_LEVEL: "\${LOG_LEVEL:-INFO}"
+      API_SERVER_KEY: "\${API_SERVER_KEY}"
+      API_SERVER_CORS_ORIGINS: "*"
+    volumes:
+      - "${HERMES_DATA_DIR}:/opt/data"
+      - "${LOGS_DIR}:/var/log/hermes"
+    networks:
+      - hermes_net
+
+  open-webui:
+    image: ${OPEN_WEBUI_IMAGE}
+    container_name: hermes-open-webui
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${OPEN_WEBUI_PORT}:8080"
+    env_file:
+      - .env
+    environment:
+      WEBUI_NAME: "\${OPEN_WEBUI_NAME:-Hermes Open WebUI}"
+      WEBUI_SECRET_KEY: "\${OPEN_WEBUI_SECRET_KEY}"
+      WEBUI_URL: "\${OPEN_WEBUI_PUBLIC_URL:-}"
+      WEBUI_ADMIN_EMAIL: "\${OPEN_WEBUI_ADMIN_EMAIL:-admin@hermes.local}"
+      WEBUI_ADMIN_PASSWORD: "\${OPEN_WEBUI_ADMIN_PASSWORD}"
+      ENABLE_SIGNUP: "false"
+      ENABLE_OPENAI_API: "true"
+      OPENAI_API_BASE_URL: "http://hermes-agent:${HERMES_API_PORT}/v1"
+      OPENAI_API_KEY: "\${API_SERVER_KEY}"
+      DEFAULT_MODELS: "hermes-agent"
+    volumes:
+      - open-webui-data:/app/backend/data
+    depends_on:
+      - hermes-agent
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/ >/dev/null 2>&1 || wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+    networks:
+      - hermes_net
+
+  ngrok-hermes:
+    image: ${NGROK_IMAGE}
+    container_name: hermes-ngrok
+    restart: unless-stopped
+    command:
+      - http
+      - open-webui:8080
+      - --log=stdout
+      - --region=eu
+    environment:
+      NGROK_AUTHTOKEN: "\${NGROK_AUTHTOKEN}"
+    ports:
+      - "127.0.0.1:${NGROK_MGMT_PORT}:${NGROK_MGMT_PORT}"
+    depends_on:
+      - open-webui
+    networks:
+      - hermes_net
+
+volumes:
+  open-webui-data:
+
+networks:
+  hermes_net:
+    driver: bridge
+    name: hermes_net
+EOF
+  log_ok "docker-compose.yml  ->  $COMPOSE_FILE"
+
+  # credentials.txt
+  cat > "$CREDS_FILE" <<EOF
+Hermes Open WebUI Access
+
+URL: run bash ${SCRIPTS_DIR}/get-url.sh after startup
+
+Open WebUI email: ${OPEN_WEBUI_ADMIN_EMAIL}
+Open WebUI password: ${OPEN_WEBUI_ADMIN_PASSWORD}
+
+ngrok exposes the public HTTPS URL without a browser auth popup. Open WebUI login protects the dashboard and is preconfigured to use Hermes at http://hermes-agent:${HERMES_API_PORT}/v1.
+EOF
+  chmod 600 "$CREDS_FILE"
+  log_ok "credentials.txt  ->  $CREDS_FILE  (chmod 600)"
   log_ok ".env  →  $ENV_FILE  (chmod 600)"
 
   # ── .gitignore ───────────────────────────────────────────────
@@ -373,11 +533,11 @@ fi
 
 echo ""
 if [[ -n "$URL" ]]; then
-  echo "  🌐  Hermes Dashboard URL:"
+  echo "  🌐  Hermes Open WebUI URL:"
   echo "      $URL"
   echo ""
   echo "  🔑  Login credentials:"
-  grep -E '^  (Username|Password):' "$CREDS" 2>/dev/null || echo "      See: $CREDS"
+  grep -E '^[[:space:]]*(Open WebUI (email|password):)' "$CREDS" 2>/dev/null || echo "      See: $CREDS"
 else
   echo "  ⚠   No URL found. Check services are running:"
   echo "      docker compose -f $HOME/hermes-ngrok/docker-compose.yml ps"
@@ -496,7 +656,7 @@ print_url_banner() {
   local url="$1"
   echo -e ""
   echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════════════════════╗${RESET}"
-  echo -e "${CYAN}${BOLD}║         HERMES DASHBOARD  —  LIVE ACCESS URL              ║${RESET}"
+  echo -e "${CYAN}${BOLD}║         HERMES OPEN WEBUI  —  LIVE ACCESS URL             ║${RESET}"
   echo -e "${CYAN}${BOLD}╠══════════════════════════════════════════════════════════╣${RESET}"
   echo -e "${CYAN}${BOLD}║${RESET}  🌐  ${GREEN}${BOLD}${url}${RESET}"
   echo -e "${CYAN}${BOLD}╠══════════════════════════════════════════════════════════╣${RESET}"
@@ -591,13 +751,29 @@ SVCEOF
 pull_images() {
   log_step "Step 9/10 — Pulling Docker Images"
 
-  log_info "Pulling $HERMES_IMAGE ..."
-  docker pull "$HERMES_IMAGE"
-  log_ok "Hermes Agent image ready"
+  if sudo docker image inspect "$HERMES_IMAGE" >/dev/null 2>&1; then
+    log_ok "Hermes Agent image already present"
+  else
+    log_info "Pulling $HERMES_IMAGE ..."
+    sudo docker pull "$HERMES_IMAGE"
+    log_ok "Hermes Agent image ready"
+  fi
 
-  log_info "Pulling $NGROK_IMAGE ..."
-  docker pull "$NGROK_IMAGE"
-  log_ok "ngrok image ready"
+  if sudo docker image inspect "$NGROK_IMAGE" >/dev/null 2>&1; then
+    log_ok "ngrok image already present"
+  else
+    log_info "Pulling $NGROK_IMAGE ..."
+    sudo docker pull "$NGROK_IMAGE"
+    log_ok "ngrok image ready"
+  fi
+
+  if sudo docker image inspect "$OPEN_WEBUI_IMAGE" >/dev/null 2>&1; then
+    log_ok "Open WebUI image already present"
+  else
+    log_info "Pulling $OPEN_WEBUI_IMAGE ..."
+    sudo docker pull "$OPEN_WEBUI_IMAGE"
+    log_ok "Open WebUI image ready"
+  fi
 }
 
 # ─────────────────────────────────────────────────────────────────
@@ -609,13 +785,14 @@ start_services() {
   cd "$PROJECT_DIR"
 
   log_info "Starting docker compose stack..."
-  docker compose up -d
+  sudo docker compose up -d --remove-orphans
 
   echo ""
-  docker compose ps
+  sudo docker compose ps
   echo ""
 
-  wait_for_port "$HERMES_DASHBOARD_PORT" "Hermes Dashboard" 40 3 || true
+  wait_for_port "$HERMES_DASHBOARD_PORT" "Hermes internal dashboard" 40 3 || true
+  wait_for_port "$OPEN_WEBUI_PORT"       "Open WebUI"                40 3 || true
   wait_for_port "$NGROK_MGMT_PORT"       "ngrok Mgmt API"   20 2 || true
 
   log_info "Starting URL watcher service..."
@@ -644,14 +821,14 @@ display_final_info() {
   echo -e "${GREEN}${BOLD}║              HERMES AGENT — DEPLOYMENT COMPLETE               ║${RESET}"
   echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════════════════════╝${RESET}"
   echo ""
-  echo -e "${BOLD}  ┌─  DASHBOARD ACCESS  ───────────────────────────────────────┐${RESET}"
+  echo -e "${BOLD}  ┌─  OPEN WEBUI ACCESS  ──────────────────────────────────────┐${RESET}"
   if [[ -n "$LIVE_URL" ]]; then
     echo -e "  │  🌐  URL:       ${CYAN}${BOLD}${LIVE_URL}${RESET}"
   else
     echo -e "  │  🌐  URL:       ${YELLOW}run  bash ${SCRIPTS_DIR}/get-url.sh${RESET}"
   fi
-  echo -e "  │  🔑  Username:  ${BOLD}${NGROK_AUTH_USER}${RESET}"
-  echo -e "  │  🔑  Password:  ${BOLD}${YELLOW}${NGROK_AUTH_PASS}${RESET}"
+  echo -e "  │  👤  Open WebUI email: ${BOLD}${OPEN_WEBUI_ADMIN_EMAIL}${RESET}"
+  echo -e "  │  🔑  Open WebUI pass:  ${BOLD}${YELLOW}${OPEN_WEBUI_ADMIN_PASSWORD}${RESET}"
   echo -e "  │"
   echo -e "  │  Credentials saved to: ${CYAN}${CREDS_FILE}${RESET}"
   echo -e "  └────────────────────────────────────────────────────────────"
@@ -671,17 +848,16 @@ display_final_info() {
   echo -e "  └────────────────────────────────────────────────────────────"
   echo ""
   echo -e "${BOLD}  ┌─  DOCKER LOGS  ──────────────��──────────────────────────────┐${RESET}"
-  echo -e "  │  Hermes:    ${CYAN}docker logs -f hermes-agent${RESET}"
-  echo -e "  │  ngrok:     ${CYAN}docker logs -f hermes-ngrok${RESET}"
+  echo -e "  │  Hermes:     ${CYAN}docker logs -f hermes-agent${RESET}"
+  echo -e "  │  Open WebUI: ${CYAN}docker logs -f hermes-open-webui${RESET}"
+  echo -e "  │  ngrok:      ${CYAN}docker logs -f hermes-ngrok${RESET}"
   echo -e "  │  Both:      ${CYAN}cd ${PROJECT_DIR} && docker compose logs -f${RESET}"
   echo -e "  └────────────────────────────────────────────────────────────"
   echo ""
   echo -e "${BOLD}  ┌─  NEXT STEPS  ──────────────────────────────────────────────┐${RESET}"
   echo -e "  │  1. Open the URL above in your browser"
-  echo -e "  │  2. Enter the username/password above when prompted"
-  echo -e "  │  3. Get your LLM API keys (OpenRouter or Gemini — free tier)"
-  echo -e "  │  4. Add keys via the web portal  OR  edit ${ENV_FILE}"
-  echo -e "  │     and restart with: bash ${SCRIPTS_DIR}/restart.sh"
+  echo -e "  │  2. Sign in to Open WebUI with the admin email/password"
+  echo -e "  │  3. Select the hermes-agent model and chat"
   echo -e "  └────────────────────────────────────────────────────────────"
   echo ""
   log_sep
@@ -724,7 +900,7 @@ main() {
       echo "  (no args)    Full deployment"
       echo "  --status     Container status + URL"
       echo "  --url        Print current ngrok URL"
-      echo "  --creds      Print dashboard credentials"
+      echo "  --creds      Print Open WebUI credentials"
       echo "  --uninstall  Stop containers + remove project"
       echo "  --help       This message"
       exit 0 ;;
