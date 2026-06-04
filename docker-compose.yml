@@ -65,7 +65,6 @@ services:
       - open-webui:8080
       - --log=stdout
       - --region=eu
-      - --basic-auth=${NGROK_AUTH_USER:-hermes}:${NGROK_AUTH_PASS}
     environment:
       NGROK_AUTHTOKEN: "${NGROK_AUTHTOKEN}"
     ports:

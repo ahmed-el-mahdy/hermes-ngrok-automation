@@ -9,7 +9,7 @@ This project automates the deployment of **Hermes Agent** (NousResearch's LLM or
 **What you get:**
 - **Open WebUI** accessible globally via HTTPS and prewired to Hermes Agent
 - **Hermes Agent** dashboard/API kept internal behind Open WebUI
-- 🔐 **ngrok Basic Auth** protection (auto-generated password)
+- 🔐 **Open WebUI account login** protection (no ngrok browser popup)
 - 🔄 **URL Watcher** systemd service (tracks ngrok URL changes automatically)
 - 💾 **Persistent data** across container restarts and updates
 - ⚡ **Fully automated** deployment (one command, 5 minutes)
@@ -68,15 +68,15 @@ When deployment finishes, you'll see:
 ║          HERMES AGENT — DEPLOYMENT COMPLETE              ║
 ╠══════════════════════════════════════════════════════════╣
 ║  🌐  URL:       https://xyz123.ngrok-free.dev           ║
-║  🔑  Username:  hermes                                   ║
-║  🔑  Password:  a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6        ║
+║  👤  Open WebUI email:  admin@hermes.local              ║
+║  🔑  Open WebUI pass:   auto-generated-password         ║
 ║                                                          ║
 ║  Credentials saved to: ~/hermes-ngrok/credentials.txt   ║
 ╚══════════════════════════════════════════════════════════╝
 ```
 
 1. **Open the URL** in your browser (from anywhere in the world!)
-2. **Enter credentials** when prompted (ngrok basic auth popup)
+2. **Sign in to Open WebUI** with the email/password from `credentials.txt`
 3. **Open WebUI appears** ✅
 
 ---
@@ -146,7 +146,7 @@ The `hermes-ngrok-deploy.sh` script automates 10 steps:
 
 ### ✅ Step 3: Collect Configuration
 - **Prompts you for:** ngrok Auth Token
-- **Auto-generates:** Dashboard password (24-char hex)
+- **Auto-generates:** Open WebUI admin password (24-char hex)
 - **Auto-generates:** API server key (48-char hex)
 - **Saves to:** `credentials.txt` (chmod 600)
 
@@ -331,7 +331,7 @@ Internet User
     ↓
 ngrok HTTPS/TLS encryption
     ↓
-ngrok Basic Auth Challenge (username + 24-char password)
+ngrok HTTPS tunnel (no browser auth popup)
     ↓
 Open WebUI (public dashboard)
     ↓
@@ -342,7 +342,7 @@ Access to LLM features, chat history, configurations
 
 ### Why This is Secure
 
-1. **External Gate:** ngrok's basic auth requires username + password
+1. **External Access:** ngrok forwards HTTPS traffic to Open WebUI
 2. **Transport Security:** HTTPS/TLS encryption (ngrok terminates)
 3. **Strong Credentials:** 24-character hex password (96 bits entropy)
 4. **Local Data:** All Hermes data stays on your Ubuntu VM
@@ -542,7 +542,7 @@ Current public route:
 
 ```text
 Internet browser
-  -> ngrok HTTPS + Basic Auth
+  -> ngrok HTTPS tunnel
   -> hermes-open-webui:8080
   -> OpenAI-compatible backend
   -> hermes-agent:8642/v1
@@ -641,7 +641,7 @@ If something doesn't work:
 | **Open WebUI** | Port 3000 locally, HTTPS via ngrok |
 | **Hermes API** | Port 8642 (OpenAI-compatible) |
 | **ngrok URL Type** | HTTPS encrypted (http://s to browser) |
-| **Auth Method** | ngrok Basic Auth (auto-generated password) |
+| **Auth Method** | Open WebUI account login |
 | **Data Persistence** | ~/.hermes/ (Docker volume) |
 | **Network Mode** | NAT (no port forwarding needed) |
 | **Cost** | Free (ngrok free tier) |

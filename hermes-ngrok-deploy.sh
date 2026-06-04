@@ -6,12 +6,12 @@
 #  Confirmed settings:
 #    ✔  ngrok FREE plan  (random URL, watcher tracks changes automatically)
 #    ✔  VM in NAT mode   (ngrok handles outbound tunnel — no port-forward needed)
-#    ✔  ngrok Basic Auth (auto-generated password — protects Open WebUI)
+#    ✔  Open WebUI authentication (no ngrok browser auth popup)
 #    ✔  LLM: OpenRouter + Google Gemini API (configure later via web portal)
 #    ✔  Open WebUI prewired to Hermes' OpenAI-compatible API
 #
 #  Security model:
-#    Internet → ngrok basic-auth challenge → Open WebUI (port 3000)
+#    Internet → ngrok HTTPS tunnel → Open WebUI (port 3000)
 #    Open WebUI connects internally to Hermes at hermes-agent:8642/v1.
 #
 #  Pattern mirrors n8n-ngrok-automation project:
@@ -53,9 +53,6 @@ readonly HERMES_DASHBOARD_PORT="9119"
 readonly HERMES_API_PORT="8642"
 readonly OPEN_WEBUI_PORT="3000"
 readonly NGROK_MGMT_PORT="4040"
-
-# Auth
-readonly NGROK_AUTH_USER="hermes"
 
 # ─────────────────────────────────────────────────────────────────
 #  COLORS
@@ -291,22 +288,6 @@ collect_config() {
     fi
   fi
 
-  # ── dashboard basic-auth credentials ──
-  # Re-use existing password if credentials file exists
-  if [[ -f "$CREDS_FILE" ]]; then
-    _existing_pass=$(grep -E '^(Password:|ngrok password:)' "$CREDS_FILE" 2>/dev/null | awk '{print $NF}' || true)
-    if [[ -n "${_existing_pass:-}" ]]; then
-      NGROK_AUTH_PASS="$_existing_pass"
-      log_ok "Reusing existing dashboard password from credentials.txt"
-    fi
-  fi
-
-  if [[ -z "${NGROK_AUTH_PASS:-}" ]]; then
-    log_info "Generating secure ngrok basic-auth password..."
-    NGROK_AUTH_PASS=$(gen_password)
-    log_ok "Password generated (24-char hex — alphanumeric only)"
-  fi
-
   API_SERVER_KEY="$(get_env_value API_SERVER_KEY || true)"
   if [[ -n "${API_SERVER_KEY:-}" ]]; then
     log_ok "Reusing existing Hermes API server key from .env"
@@ -343,8 +324,6 @@ collect_config() {
   echo ""
   log_ok "Config ready"
   log_info "ngrok token:        ${NGROK_AUTHTOKEN:0:8}****"
-  log_info "Dashboard user:     ${NGROK_AUTH_USER}"
-  log_info "Dashboard password: ${NGROK_AUTH_PASS}"
   log_info "Open WebUI admin:   ${OPEN_WEBUI_ADMIN_EMAIL}"
 }
 
@@ -382,11 +361,6 @@ generate_configs() {
 
 # ── ngrok ────────────────────────────────────────────────────────
 NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
-
-# ── ngrok Basic Auth (auto-generated — protects dashboard) ───────
-# This is the login for the Hermes web portal via ngrok URL
-NGROK_AUTH_USER=${NGROK_AUTH_USER}
-NGROK_AUTH_PASS=${NGROK_AUTH_PASS}
 
 # ── Service ports + Hermes Gateway API (preserved on redeploy) ───
 HERMES_DASHBOARD_PORT=${HERMES_DASHBOARD_PORT}
@@ -489,7 +463,6 @@ services:
       - open-webui:8080
       - --log=stdout
       - --region=eu
-      - --basic-auth=\${NGROK_AUTH_USER}:\${NGROK_AUTH_PASS}
     environment:
       NGROK_AUTHTOKEN: "\${NGROK_AUTHTOKEN}"
     ports:
@@ -514,13 +487,11 @@ EOF
 Hermes Open WebUI Access
 
 URL: run bash ${SCRIPTS_DIR}/get-url.sh after startup
-ngrok username: ${NGROK_AUTH_USER}
-ngrok password: ${NGROK_AUTH_PASS}
 
 Open WebUI email: ${OPEN_WEBUI_ADMIN_EMAIL}
 Open WebUI password: ${OPEN_WEBUI_ADMIN_PASSWORD}
 
-ngrok credentials protect the public URL. Open WebUI is preconfigured to use Hermes at http://hermes-agent:${HERMES_API_PORT}/v1.
+ngrok exposes the public HTTPS URL without a browser auth popup. Open WebUI login protects the dashboard and is preconfigured to use Hermes at http://hermes-agent:${HERMES_API_PORT}/v1.
 EOF
   chmod 600 "$CREDS_FILE"
   log_ok "credentials.txt  ->  $CREDS_FILE  (chmod 600)"
@@ -566,7 +537,7 @@ if [[ -n "$URL" ]]; then
   echo "      $URL"
   echo ""
   echo "  🔑  Login credentials:"
-  grep -E '^[[:space:]]*((ngrok|Open WebUI) (username|password|email):)' "$CREDS" 2>/dev/null || echo "      See: $CREDS"
+  grep -E '^[[:space:]]*(Open WebUI (email|password):)' "$CREDS" 2>/dev/null || echo "      See: $CREDS"
 else
   echo "  ⚠   No URL found. Check services are running:"
   echo "      docker compose -f $HOME/hermes-ngrok/docker-compose.yml ps"
@@ -856,8 +827,6 @@ display_final_info() {
   else
     echo -e "  │  🌐  URL:       ${YELLOW}run  bash ${SCRIPTS_DIR}/get-url.sh${RESET}"
   fi
-  echo -e "  │  🔑  ngrok user:       ${BOLD}${NGROK_AUTH_USER}${RESET}"
-  echo -e "  │  🔑  ngrok password:   ${BOLD}${YELLOW}${NGROK_AUTH_PASS}${RESET}"
   echo -e "  │  👤  Open WebUI email: ${BOLD}${OPEN_WEBUI_ADMIN_EMAIL}${RESET}"
   echo -e "  │  🔑  Open WebUI pass:  ${BOLD}${YELLOW}${OPEN_WEBUI_ADMIN_PASSWORD}${RESET}"
   echo -e "  │"
@@ -887,9 +856,8 @@ display_final_info() {
   echo ""
   echo -e "${BOLD}  ┌─  NEXT STEPS  ──────────────────────────────────────────────┐${RESET}"
   echo -e "  │  1. Open the URL above in your browser"
-  echo -e "  │  2. Pass the ngrok Basic Auth prompt"
-  echo -e "  │  3. Sign in to Open WebUI with the admin email/password"
-  echo -e "  │  4. Select the hermes-agent model and chat"
+  echo -e "  │  2. Sign in to Open WebUI with the admin email/password"
+  echo -e "  │  3. Select the hermes-agent model and chat"
   echo -e "  └────────────────────────────────────────────────────────────"
   echo ""
   log_sep
@@ -932,7 +900,7 @@ main() {
       echo "  (no args)    Full deployment"
       echo "  --status     Container status + URL"
       echo "  --url        Print current ngrok URL"
-      echo "  --creds      Print dashboard credentials"
+      echo "  --creds      Print Open WebUI credentials"
       echo "  --uninstall  Stop containers + remove project"
       echo "  --help       This message"
       exit 0 ;;
