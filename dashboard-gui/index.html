@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hermes Control GUI</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Ngrok public entry</p>
+        <h1>Hermes Control GUI</h1>
+      </div>
+      <div class="status-row" aria-live="polite">
+        <span class="status-pill" id="guiStatus">GUI checking</span>
+        <span class="status-pill" id="hermesStatus">Hermes checking</span>
+        <span class="status-pill" id="apiStatus">API checking</span>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel console-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">OpenAI-compatible request</p>
+            <h2>Prompt Console</h2>
+          </div>
+          <button class="ghost-button" id="refreshButton" type="button">Refresh</button>
+        </div>
+
+        <form id="chatForm" class="chat-form">
+          <label for="modelInput">Model</label>
+          <input
+            id="modelInput"
+            name="model"
+            list="modelOptions"
+            value="hermes-agent"
+            autocomplete="off"
+          />
+          <datalist id="modelOptions"></datalist>
+
+          <label for="systemInput">System</label>
+          <textarea id="systemInput" rows="3">You are Hermes, a precise automation assistant.</textarea>
+
+          <label for="messageInput">Message</label>
+          <textarea id="messageInput" rows="8">Check the current Hermes gateway setup and answer briefly.</textarea>
+
+          <div class="form-actions">
+            <button class="primary-button" id="sendButton" type="submit">Send</button>
+            <button class="secondary-button" id="clearButton" type="button">Clear</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel response-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Gateway response</p>
+            <h2>Result</h2>
+          </div>
+          <button class="ghost-button" id="copyButton" type="button">Copy</button>
+        </div>
+        <pre id="responseOutput">Waiting for a request.</pre>
+      </section>
+
+      <section class="panel status-panel">
+        <p class="eyebrow">Service map</p>
+        <h2>Public Route</h2>
+        <dl class="route-list">
+          <div>
+            <dt>Browser</dt>
+            <dd id="publicUrl">Current ngrok URL</dd>
+          </div>
+          <div>
+            <dt>Public target</dt>
+            <dd>hermes-dashboard-gui:8088</dd>
+          </div>
+          <div>
+            <dt>Internal API proxy</dt>
+            <dd>/api/gateway/v1/chat/completions</dd>
+          </div>
+          <div>
+            <dt>Native Hermes</dt>
+            <dd>Internal compose network only</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="panel status-panel">
+        <p class="eyebrow">Runtime</p>
+        <h2>Checks</h2>
+        <ul class="check-list" id="checkList">
+          <li>GUI health is pending</li>
+          <li>Hermes dashboard health is pending</li>
+          <li>Gateway API model check is pending</li>
+        </ul>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

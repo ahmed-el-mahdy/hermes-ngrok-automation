@@ -8,16 +8,16 @@
 #    ✔  VM in NAT mode   (ngrok handles outbound tunnel — no port-forward needed)
 #    ✔  ngrok Basic Auth (auto-generated password — protects the dashboard)
 #    ✔  LLM: OpenRouter + Google Gemini API (configure later via web portal)
-#    ✔  HERMES_DASHBOARD_INSECURE=1 (safe because ngrok basic-auth is the gate)
+#    ✔  Custom dashboard GUI is the public ngrok target
 #
 #  Security model:
-#    Internet → ngrok basic-auth challenge → Hermes dashboard (port 9119)
-#    The dashboard runs in insecure mode INTERNALLY but is protected
-#    by ngrok's own authentication layer EXTERNALLY.
+#    Internet → ngrok basic-auth challenge → custom GUI (port 8088)
+#    The GUI proxies approved API calls to Hermes internally. The native
+#    Hermes dashboard remains bound to localhost/compose network only.
 #
 #  Pattern mirrors n8n-ngrok-automation project:
-#    Two containers on shared bridge network  (hermes-net)
-#    ngrok sidecar tunnels dashboard port to internet
+#    Three containers on shared bridge network  (hermes-net)
+#    ngrok sidecar tunnels the custom GUI port to internet
 #    URL watcher service tracks ngrok URL changes
 #
 #  Usage:
@@ -37,6 +37,7 @@ readonly HERMES_DATA_DIR="$HOME/.hermes"
 readonly COMPOSE_FILE="$PROJECT_DIR/docker-compose.yml"
 readonly ENV_FILE="$PROJECT_DIR/.env"
 readonly CREDS_FILE="$PROJECT_DIR/credentials.txt"
+readonly DASHBOARD_GUI_DIR="$PROJECT_DIR/dashboard-gui"
 readonly SCRIPTS_DIR="$PROJECT_DIR/scripts"
 readonly LOGS_DIR="$PROJECT_DIR/logs"
 readonly URL_FILE="$PROJECT_DIR/current-url.txt"
@@ -47,10 +48,12 @@ readonly NGROK_API="http://localhost:4040/api/tunnels"
 # Docker images
 readonly HERMES_IMAGE="nousresearch/hermes-agent:latest"
 readonly NGROK_IMAGE="ngrok/ngrok:latest"
+readonly DASHBOARD_GUI_IMAGE="nginx:1.27-alpine"
 
 # Ports
 readonly HERMES_DASHBOARD_PORT="9119"
 readonly HERMES_API_PORT="8642"
+readonly DASHBOARD_GUI_PORT="8088"
 readonly NGROK_MGMT_PORT="4040"
 
 # Auth
@@ -127,6 +130,24 @@ gen_password() {
     || head -c 24 /dev/urandom | xxd -p 2>/dev/null \
     || cat /proc/sys/kernel/random/uuid 2>/dev/null | tr -d '-' | head -c 24 \
     || echo "changeme$(date +%s)"
+}
+
+get_env_value() {
+  local key="$1" file="${2:-$ENV_FILE}"
+  [[ -f "$file" ]] || return 0
+  grep -E "^${key}=" "$file" 2>/dev/null | tail -n 1 | cut -d= -f2-
+}
+
+write_optional_env() {
+  local key="$1" placeholder="$2" value
+  local preserved_var="PRESERVE_${key}"
+  value="${!preserved_var:-}"
+  [[ -n "${value:-}" ]] || value="$(get_env_value "$key" || true)"
+  if [[ -n "${value:-}" ]]; then
+    printf '%s=%s\n' "$key" "$value"
+  else
+    printf '# %s=%s\n' "$key" "$placeholder"
+  fi
 }
 
 get_ngrok_url() {
@@ -288,6 +309,19 @@ collect_config() {
     log_ok "Password generated (24-char hex — alphanumeric only)"
   fi
 
+  API_SERVER_KEY="$(get_env_value API_SERVER_KEY || true)"
+  if [[ -n "${API_SERVER_KEY:-}" ]]; then
+    log_ok "Reusing existing Hermes API server key from .env"
+  else
+    log_info "Generating secure Hermes API server key..."
+    API_SERVER_KEY="$(gen_password)$(gen_password)"
+    log_ok "Hermes API server key generated"
+  fi
+
+  for key in OPENROUTER_API_KEY GOOGLE_API_KEY GEMINI_API_KEY ANTHROPIC_API_KEY OPENAI_API_KEY; do
+    printf -v "PRESERVE_${key}" '%s' "$(get_env_value "$key" || true)"
+  done
+
   echo ""
   log_ok "Config ready"
   log_info "ngrok token:        ${NGROK_AUTHTOKEN:0:8}****"
@@ -301,10 +335,11 @@ collect_config() {
 create_directories() {
   log_step "Step 4/10 — Creating Directory Structure"
 
-  mkdir -p "$PROJECT_DIR" "$SCRIPTS_DIR" "$LOGS_DIR" "$HERMES_DATA_DIR"
-  chmod 700 "$HERMES_DATA_DIR"   # only owner can read hermes data
+  mkdir -p "$PROJECT_DIR" "$DASHBOARD_GUI_DIR" "$SCRIPTS_DIR" "$LOGS_DIR" "$HERMES_DATA_DIR"
+  chmod 700 "$HERMES_DATA_DIR" 2>/dev/null || sudo chmod 700 "$HERMES_DATA_DIR"
 
   log_ok "$PROJECT_DIR"
+  log_ok "$DASHBOARD_GUI_DIR"
   log_ok "$HERMES_DATA_DIR  (chmod 700)"
   log_ok "$SCRIPTS_DIR"
   log_ok "$LOGS_DIR"
@@ -331,23 +366,27 @@ NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
 NGROK_AUTH_USER=${NGROK_AUTH_USER}
 NGROK_AUTH_PASS=${NGROK_AUTH_PASS}
 
-# ── Hermes Gateway API (auto-generated strong key) ───────────────
-API_SERVER_KEY=$(gen_password)$(gen_password)
+# ── Service ports + Hermes Gateway API (preserved on redeploy) ───
+HERMES_DASHBOARD_PORT=${HERMES_DASHBOARD_PORT}
+HERMES_API_PORT=${HERMES_API_PORT}
+DASHBOARD_GUI_PORT=${DASHBOARD_GUI_PORT}
+API_SERVER_KEY=${API_SERVER_KEY}
 
 # ── LLM API Keys  (add after first web portal access) ────────────
 # Provider 1 — OpenRouter  (free tier available)
 # Get key → https://openrouter.ai/keys
-# OPENROUTER_API_KEY=sk-or-v1-
+$(write_optional_env OPENROUTER_API_KEY sk-or-v1-)
 
 # Provider 2 — Google Gemini  (free tier available)
 # Get key → https://aistudio.google.com/app/apikey
-# GOOGLE_API_KEY=AIza
+$(write_optional_env GOOGLE_API_KEY AIza)
+$(write_optional_env GEMINI_API_KEY AIza)
 
 # Provider 3 — Anthropic  (optional)
-# ANTHROPIC_API_KEY=sk-ant-
+$(write_optional_env ANTHROPIC_API_KEY sk-ant-)
 
 # Provider 4 — OpenAI  (optional)
-# OPENAI_API_KEY=sk-
+$(write_optional_env OPENAI_API_KEY sk-)
 EOF
   chmod 600 "$ENV_FILE"
   log_ok ".env  ->  $ENV_FILE  (chmod 600)"
@@ -381,13 +420,39 @@ services:
     networks:
       - hermes_net
 
+  hermes-dashboard-gui:
+    image: ${DASHBOARD_GUI_IMAGE}
+    container_name: hermes-dashboard-gui
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${DASHBOARD_GUI_PORT}:${DASHBOARD_GUI_PORT}"
+    env_file:
+      - .env
+    environment:
+      DASHBOARD_GUI_PORT: "${DASHBOARD_GUI_PORT}"
+      HERMES_DASHBOARD_URL: "http://hermes-agent:${HERMES_DASHBOARD_PORT}"
+      HERMES_API_URL: "http://hermes-agent:${HERMES_API_PORT}"
+      API_SERVER_KEY: "\${API_SERVER_KEY}"
+    volumes:
+      - "${DASHBOARD_GUI_DIR}:/usr/share/nginx/html:ro"
+      - "${DASHBOARD_GUI_DIR}/nginx.conf.template:/etc/nginx/templates/default.conf.template:ro"
+    depends_on:
+      - hermes-agent
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:${DASHBOARD_GUI_PORT}/healthz >/dev/null 2>&1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hermes_net
+
   ngrok-hermes:
     image: ${NGROK_IMAGE}
     container_name: hermes-ngrok
     restart: unless-stopped
     command:
       - http
-      - hermes-agent:${HERMES_DASHBOARD_PORT}
+      - hermes-dashboard-gui:${DASHBOARD_GUI_PORT}
       - --log=stdout
       - --region=eu
       - --basic-auth=\${NGROK_AUTH_USER}:\${NGROK_AUTH_PASS}
@@ -396,7 +461,7 @@ services:
     ports:
       - "127.0.0.1:${NGROK_MGMT_PORT}:${NGROK_MGMT_PORT}"
     depends_on:
-      - hermes-agent
+      - hermes-dashboard-gui
     networks:
       - hermes_net
 
@@ -407,15 +472,161 @@ networks:
 EOF
   log_ok "docker-compose.yml  ->  $COMPOSE_FILE"
 
+  # dashboard GUI assets
+  cat > "$DASHBOARD_GUI_DIR/index.html" <<'DASHBOARD_INDEX_EOF'
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hermes Control GUI</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Ngrok public entry</p>
+        <h1>Hermes Control GUI</h1>
+      </div>
+      <div class="status-row" aria-live="polite">
+        <span class="status-pill" id="guiStatus">GUI checking</span>
+        <span class="status-pill" id="hermesStatus">Hermes checking</span>
+        <span class="status-pill" id="apiStatus">API checking</span>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel console-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">OpenAI-compatible request</p>
+            <h2>Prompt Console</h2>
+          </div>
+          <button class="ghost-button" id="refreshButton" type="button">Refresh</button>
+        </div>
+        <form id="chatForm" class="chat-form">
+          <label for="modelInput">Model</label>
+          <input id="modelInput" name="model" list="modelOptions" value="hermes-agent" autocomplete="off" />
+          <datalist id="modelOptions"></datalist>
+          <label for="systemInput">System</label>
+          <textarea id="systemInput" rows="3">You are Hermes, a precise automation assistant.</textarea>
+          <label for="messageInput">Message</label>
+          <textarea id="messageInput" rows="8">Check the current Hermes gateway setup and answer briefly.</textarea>
+          <div class="form-actions">
+            <button class="primary-button" id="sendButton" type="submit">Send</button>
+            <button class="secondary-button" id="clearButton" type="button">Clear</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel response-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Gateway response</p>
+            <h2>Result</h2>
+          </div>
+          <button class="ghost-button" id="copyButton" type="button">Copy</button>
+        </div>
+        <pre id="responseOutput">Waiting for a request.</pre>
+      </section>
+
+      <section class="panel status-panel">
+        <p class="eyebrow">Service map</p>
+        <h2>Public Route</h2>
+        <dl class="route-list">
+          <div><dt>Browser</dt><dd id="publicUrl">Current ngrok URL</dd></div>
+          <div><dt>Public target</dt><dd>hermes-dashboard-gui:8088</dd></div>
+          <div><dt>API proxy</dt><dd>/api/gateway/v1/chat/completions</dd></div>
+          <div><dt>Native Hermes</dt><dd>Internal compose network only</dd></div>
+        </dl>
+      </section>
+
+      <section class="panel status-panel">
+        <p class="eyebrow">Runtime</p>
+        <h2>Checks</h2>
+        <ul class="check-list" id="checkList">
+          <li>GUI health is pending</li>
+          <li>Hermes dashboard health is pending</li>
+          <li>Gateway API model check is pending</li>
+        </ul>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
+DASHBOARD_INDEX_EOF
+
+  cat > "$DASHBOARD_GUI_DIR/styles.css" <<'DASHBOARD_STYLES_EOF'
+:root{--bg:#f6f7f4;--surface:#fff;--surface-muted:#eef3ef;--ink:#18201d;--muted:#66706b;--line:#d9ded9;--teal:#0f766e;--teal-dark:#115e59;--amber:#b45309;--red:#b91c1c;--shadow:0 18px 45px rgba(24,32,29,.08)}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:linear-gradient(180deg,rgba(15,118,110,.08),rgba(246,247,244,0) 280px),var(--bg);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,input,textarea{font:inherit}.topbar{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;padding:28px clamp(18px,4vw,48px) 18px;border-bottom:1px solid var(--line)}.eyebrow{margin:0 0 6px;color:var(--teal-dark);font-size:12px;font-weight:800;letter-spacing:0;text-transform:uppercase}h1,h2{margin:0;letter-spacing:0}h1{font-size:32px;line-height:1.1}h2{font-size:18px}.status-row{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}.status-pill{min-height:32px;border:1px solid var(--line);border-radius:8px;padding:7px 10px;background:var(--surface);color:var(--muted);font-size:13px;font-weight:700;white-space:nowrap}.status-pill.ok{border-color:rgba(15,118,110,.35);background:rgba(15,118,110,.1);color:var(--teal-dark)}.status-pill.warn{border-color:rgba(180,83,9,.35);background:rgba(180,83,9,.1);color:var(--amber)}.status-pill.fail{border-color:rgba(185,28,28,.35);background:rgba(185,28,28,.1);color:var(--red)}.layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(360px,.9fr);gap:18px;padding:22px clamp(18px,4vw,48px) 38px}.panel{border:1px solid var(--line);border-radius:8px;background:var(--surface);box-shadow:var(--shadow)}.console-panel,.response-panel{min-height:560px}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px;border-bottom:1px solid var(--line)}.chat-form{display:grid;gap:10px;padding:18px}label{color:var(--muted);font-size:13px;font-weight:800}input,textarea{width:100%;border:1px solid var(--line);border-radius:8px;background:#fbfcfb;color:var(--ink);padding:11px 12px;outline:none}textarea{resize:vertical}input:focus,textarea:focus{border-color:var(--teal);box-shadow:0 0 0 3px rgba(15,118,110,.15)}.form-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:6px}button{min-height:38px;border-radius:8px;border:1px solid transparent;padding:9px 13px;cursor:pointer;font-weight:800}button:disabled{cursor:wait;opacity:.72}.primary-button{background:var(--teal);color:#fff}.primary-button:hover{background:var(--teal-dark)}.secondary-button,.ghost-button{background:var(--surface-muted);color:var(--ink);border-color:var(--line)}.secondary-button:hover,.ghost-button:hover{background:#e4ebe5}#responseOutput{min-height:468px;max-height:640px;margin:0;padding:18px;overflow:auto;background:#111816;color:#e6f1ed;font-size:13px;line-height:1.55;white-space:pre-wrap}.status-panel{padding:18px}.route-list{display:grid;gap:12px;margin:16px 0 0}.route-list div{display:grid;grid-template-columns:140px minmax(0,1fr);gap:12px;padding-top:12px;border-top:1px solid var(--line)}dt{color:var(--muted);font-size:13px;font-weight:800}dd{margin:0;min-width:0;overflow-wrap:anywhere;font-size:14px}.check-list{display:grid;gap:10px;margin:16px 0 0;padding:0;list-style:none}.check-list li{border-left:4px solid var(--line);padding:8px 0 8px 12px;color:var(--muted)}.check-list li.ok{border-left-color:var(--teal);color:var(--ink)}.check-list li.warn{border-left-color:var(--amber)}.check-list li.fail{border-left-color:var(--red)}@media(max-width:920px){.topbar{align-items:flex-start;flex-direction:column}.status-row{justify-content:flex-start}.layout{grid-template-columns:1fr}.console-panel,.response-panel{min-height:auto}}@media(max-width:560px){h1{font-size:26px}.panel-head,.form-actions,.route-list div{align-items:stretch;grid-template-columns:1fr}.panel-head,.form-actions{flex-direction:column}button{width:100%}}
+DASHBOARD_STYLES_EOF
+
+  cat > "$DASHBOARD_GUI_DIR/app.js" <<'DASHBOARD_APP_EOF'
+const state={lastResponseText:""};const els={guiStatus:document.getElementById("guiStatus"),hermesStatus:document.getElementById("hermesStatus"),apiStatus:document.getElementById("apiStatus"),checkList:document.getElementById("checkList"),publicUrl:document.getElementById("publicUrl"),modelInput:document.getElementById("modelInput"),modelOptions:document.getElementById("modelOptions"),systemInput:document.getElementById("systemInput"),messageInput:document.getElementById("messageInput"),responseOutput:document.getElementById("responseOutput"),chatForm:document.getElementById("chatForm"),sendButton:document.getElementById("sendButton"),refreshButton:document.getElementById("refreshButton"),clearButton:document.getElementById("clearButton"),copyButton:document.getElementById("copyButton")};function setPill(el,label,mode){el.textContent=label;el.className=`status-pill ${mode||""}`.trim()}function setChecks(checks){els.checkList.innerHTML="";checks.forEach(check=>{const item=document.createElement("li");item.className=check.mode||"";item.textContent=check.text;els.checkList.appendChild(item)})}async function readResponse(response){const text=await response.text();try{return{text,json:JSON.parse(text)}}catch{return{text,json:null}}}function formatAssistantResponse(payload,fallbackText){const message=payload?.choices?.[0]?.message?.content;if(message)return message.trim();const text=payload?.choices?.[0]?.text;if(text)return text.trim();return fallbackText||JSON.stringify(payload,null,2)}async function loadModels(){const response=await fetch("/api/gateway/v1/models",{headers:{Accept:"application/json"}});const{json,text}=await readResponse(response);if(!response.ok)throw new Error(text||`Model check failed with HTTP ${response.status}`);const models=Array.isArray(json?.data)?json.data:[];els.modelOptions.innerHTML="";models.map(model=>model.id||model.name).filter(Boolean).slice(0,80).forEach(id=>{const option=document.createElement("option");option.value=id;els.modelOptions.appendChild(option)});return models.length}async function refreshStatus(){els.publicUrl.textContent=window.location.href;const checks=[];try{const gui=await fetch("/healthz",{cache:"no-store"});setPill(els.guiStatus,gui.ok?"GUI online":"GUI warning",gui.ok?"ok":"warn");checks.push({text:gui.ok?"Custom dashboard GUI is responding.":`GUI health returned HTTP ${gui.status}.`,mode:gui.ok?"ok":"warn"})}catch(error){setPill(els.guiStatus,"GUI offline","fail");checks.push({text:`GUI health failed: ${error.message}`,mode:"fail"})}try{const hermes=await fetch("/api/health",{cache:"no-store"});setPill(els.hermesStatus,hermes.ok?"Hermes healthy":"Hermes warning",hermes.ok?"ok":"warn");checks.push({text:hermes.ok?"Hermes internal dashboard health is reachable through the GUI service.":`Hermes health returned HTTP ${hermes.status}.`,mode:hermes.ok?"ok":"warn"})}catch(error){setPill(els.hermesStatus,"Hermes offline","fail");checks.push({text:`Hermes health failed: ${error.message}`,mode:"fail"})}try{const count=await loadModels();setPill(els.apiStatus,count?`${count} models`:"API reachable","ok");checks.push({text:count?`Gateway API is reachable and returned ${count} model entries.`:"Gateway API is reachable; no model list was returned.",mode:"ok"})}catch(error){setPill(els.apiStatus,"API needs check","warn");checks.push({text:`Gateway API model check: ${error.message}`,mode:"warn"})}setChecks(checks)}async function sendChat(event){event.preventDefault();els.sendButton.disabled=true;els.responseOutput.textContent="Sending request...";const body={model:els.modelInput.value.trim(),messages:[{role:"system",content:els.systemInput.value.trim()},{role:"user",content:els.messageInput.value.trim()}],stream:false};try{const response=await fetch("/api/gateway/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const{json,text}=await readResponse(response);if(!response.ok)throw new Error(text||`Chat request failed with HTTP ${response.status}`);const output=formatAssistantResponse(json,text);state.lastResponseText=output;els.responseOutput.textContent=output}catch(error){state.lastResponseText=error.message;els.responseOutput.textContent=error.message}finally{els.sendButton.disabled=false}}els.chatForm.addEventListener("submit",sendChat);els.refreshButton.addEventListener("click",refreshStatus);els.clearButton.addEventListener("click",()=>{els.responseOutput.textContent="Waiting for a request.";state.lastResponseText=""});els.copyButton.addEventListener("click",async()=>{const text=state.lastResponseText||els.responseOutput.textContent;await navigator.clipboard.writeText(text);els.copyButton.textContent="Copied";window.setTimeout(()=>{els.copyButton.textContent="Copy"},1200)});refreshStatus();window.setInterval(refreshStatus,3e4);
+DASHBOARD_APP_EOF
+
+  cat > "$DASHBOARD_GUI_DIR/nginx.conf.template" <<'DASHBOARD_NGINX_EOF'
+server {
+  listen ${DASHBOARD_GUI_PORT};
+  server_name _;
+
+  root /usr/share/nginx/html;
+  index index.html;
+
+  location = /healthz {
+    access_log off;
+    add_header Content-Type text/plain;
+    return 200 "ok\n";
+  }
+
+  location = /api/health {
+    proxy_pass ${HERMES_DASHBOARD_URL}/health;
+    proxy_http_version 1.1;
+    proxy_set_header Host hermes-agent;
+  }
+
+  location /api/gateway/ {
+    proxy_pass ${HERMES_API_URL}/;
+    proxy_http_version 1.1;
+    proxy_set_header Host hermes-agent;
+    proxy_set_header Authorization "Bearer ${API_SERVER_KEY}";
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+    proxy_buffering off;
+  }
+
+  location = / {
+    try_files /index.html =404;
+  }
+
+  location = /index.html {
+    try_files /index.html =404;
+  }
+
+  location = /styles.css {
+    try_files /styles.css =404;
+  }
+
+  location = /app.js {
+    try_files /app.js =404;
+  }
+
+  location / {
+    try_files /index.html =404;
+  }
+}
+DASHBOARD_NGINX_EOF
+  log_ok "dashboard GUI assets  ->  $DASHBOARD_GUI_DIR"
+
   # credentials.txt
   cat > "$CREDS_FILE" <<EOF
-Hermes Dashboard Access
+Hermes Control GUI Access
 
 URL: run bash ${SCRIPTS_DIR}/get-url.sh after startup
 Username: ${NGROK_AUTH_USER}
 Password: ${NGROK_AUTH_PASS}
 
-Credentials protect the ngrok public URL with HTTP Basic Auth.
+Credentials protect the public GUI URL with ngrok HTTP Basic Auth.
 EOF
   chmod 600 "$CREDS_FILE"
   log_ok "credentials.txt  ->  $CREDS_FILE  (chmod 600)"
@@ -457,7 +668,7 @@ fi
 
 echo ""
 if [[ -n "$URL" ]]; then
-  echo "  🌐  Hermes Dashboard URL:"
+  echo "  🌐  Hermes Control GUI URL:"
   echo "      $URL"
   echo ""
   echo "  🔑  Login credentials:"
@@ -580,7 +791,7 @@ print_url_banner() {
   local url="$1"
   echo -e ""
   echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════════════════════╗${RESET}"
-  echo -e "${CYAN}${BOLD}║         HERMES DASHBOARD  —  LIVE ACCESS URL              ║${RESET}"
+  echo -e "${CYAN}${BOLD}║         HERMES CONTROL GUI  —  LIVE ACCESS URL           ║${RESET}"
   echo -e "${CYAN}${BOLD}╠══════════════════════════════════════════════════════════╣${RESET}"
   echo -e "${CYAN}${BOLD}║${RESET}  🌐  ${GREEN}${BOLD}${url}${RESET}"
   echo -e "${CYAN}${BOLD}╠══════════════════════════════════════════════════════════╣${RESET}"
@@ -675,13 +886,29 @@ SVCEOF
 pull_images() {
   log_step "Step 9/10 — Pulling Docker Images"
 
-  log_info "Pulling $HERMES_IMAGE ..."
-  sudo docker pull "$HERMES_IMAGE"
-  log_ok "Hermes Agent image ready"
+  if sudo docker image inspect "$HERMES_IMAGE" >/dev/null 2>&1; then
+    log_ok "Hermes Agent image already present"
+  else
+    log_info "Pulling $HERMES_IMAGE ..."
+    sudo docker pull "$HERMES_IMAGE"
+    log_ok "Hermes Agent image ready"
+  fi
 
-  log_info "Pulling $NGROK_IMAGE ..."
-  sudo docker pull "$NGROK_IMAGE"
-  log_ok "ngrok image ready"
+  if sudo docker image inspect "$NGROK_IMAGE" >/dev/null 2>&1; then
+    log_ok "ngrok image already present"
+  else
+    log_info "Pulling $NGROK_IMAGE ..."
+    sudo docker pull "$NGROK_IMAGE"
+    log_ok "ngrok image ready"
+  fi
+
+  if sudo docker image inspect "$DASHBOARD_GUI_IMAGE" >/dev/null 2>&1; then
+    log_ok "dashboard GUI image already present"
+  else
+    log_info "Pulling $DASHBOARD_GUI_IMAGE ..."
+    sudo docker pull "$DASHBOARD_GUI_IMAGE"
+    log_ok "dashboard GUI image ready"
+  fi
 }
 
 # ─────────────────────────────────────────────────────────────────
@@ -699,7 +926,8 @@ start_services() {
   sudo docker compose ps
   echo ""
 
-  wait_for_port "$HERMES_DASHBOARD_PORT" "Hermes Dashboard" 40 3 || true
+  wait_for_port "$HERMES_DASHBOARD_PORT" "Hermes internal dashboard" 40 3 || true
+  wait_for_port "$DASHBOARD_GUI_PORT"    "Hermes Control GUI"      40 3 || true
   wait_for_port "$NGROK_MGMT_PORT"       "ngrok Mgmt API"   20 2 || true
 
   log_info "Starting URL watcher service..."
@@ -728,7 +956,7 @@ display_final_info() {
   echo -e "${GREEN}${BOLD}║              HERMES AGENT — DEPLOYMENT COMPLETE               ║${RESET}"
   echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════════════════════╝${RESET}"
   echo ""
-  echo -e "${BOLD}  ┌─  DASHBOARD ACCESS  ───────────────────────────────────────┐${RESET}"
+  echo -e "${BOLD}  ┌─  CONTROL GUI ACCESS  ─────────────────────────────────────┐${RESET}"
   if [[ -n "$LIVE_URL" ]]; then
     echo -e "  │  🌐  URL:       ${CYAN}${BOLD}${LIVE_URL}${RESET}"
   else
@@ -756,6 +984,7 @@ display_final_info() {
   echo ""
   echo -e "${BOLD}  ┌─  DOCKER LOGS  ──────────────��──────────────────────────────┐${RESET}"
   echo -e "  │  Hermes:    ${CYAN}docker logs -f hermes-agent${RESET}"
+  echo -e "  │  GUI:       ${CYAN}docker logs -f hermes-dashboard-gui${RESET}"
   echo -e "  │  ngrok:     ${CYAN}docker logs -f hermes-ngrok${RESET}"
   echo -e "  │  Both:      ${CYAN}cd ${PROJECT_DIR} && docker compose logs -f${RESET}"
   echo -e "  └────────────────────────────────────────────────────────────"

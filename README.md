@@ -4,10 +4,13 @@
 
 ## 📘 Quick Overview
 
-This project automates the deployment of **Hermes Agent** (NousResearch's LLM orchestration platform) on an Ubuntu Minimal Server with **ngrok** tunneling, following the proven pattern from [n8n-ngrok-automation](https://github.com/ahmed-el-mahdy/n8n-ngrok-automation).
+This project automates the deployment of **Hermes Agent** (NousResearch's LLM orchestration platform) on an Ubuntu Minimal Server with a custom public dashboard GUI and **ngrok** tunneling, following the proven pattern from [n8n-ngrok-automation](https://github.com/ahmed-el-mahdy/n8n-ngrok-automation).
+
+**Mandatory routing update:** ngrok now publishes the custom **Hermes Control GUI** on port `8088`. The built-in Hermes dashboard on `9119` and the Hermes API on `8642` stay internal behind the GUI/proxy layer instead of being exposed directly as the ngrok target.
 
 **What you get:**
-- 🤖 **Hermes Agent** web dashboard accessible globally via HTTPS
+- **Hermes Control GUI** accessible globally via HTTPS
+- **Hermes Agent** dashboard/API kept internal behind the GUI proxy
 - 🔐 **ngrok Basic Auth** protection (auto-generated password)
 - 🔄 **URL Watcher** systemd service (tracks ngrok URL changes automatically)
 - 💾 **Persistent data** across container restarts and updates
@@ -58,7 +61,7 @@ chmod +x hermes-ngrok-deploy.sh
 - Press ENTER
 - Wait 3-5 minutes (script handles everything automatically)
 
-### Step 4: Access Hermes Dashboard
+### Step 4: Access Hermes Control GUI
 
 When deployment finishes, you'll see:
 
@@ -76,7 +79,7 @@ When deployment finishes, you'll see:
 
 1. **Open the URL** in your browser (from anywhere in the world!)
 2. **Enter credentials** when prompted (ngrok basic auth popup)
-3. **Hermes Dashboard appears** ✅
+3. **Hermes Control GUI appears** ✅
 
 ---
 
@@ -115,8 +118,9 @@ Ubuntu Home Directory (~)
 
 | Container | Port | Role |
 |-----------|------|------|
-| **hermes-agent** | 9119 (dashboard), 8642 (API) | LLM orchestration engine |
-| **hermes-ngrok** | 4040 (mgmt API) | HTTPS tunnel to internet |
+| **hermes-agent** | 9119 (dashboard), 8642 (API) | LLM orchestration engine, internal behind GUI |
+| **hermes-dashboard-gui** | 8088 | Public dashboard GUI and API proxy |
+| **hermes-ngrok** | 4040 (mgmt API) | HTTPS tunnel to the GUI |
 
 ### Systemd Service
 
@@ -158,7 +162,8 @@ The `hermes-ngrok-deploy.sh` script automates 10 steps:
 
 ### ✅ Step 5: Generate Configuration Files
 - **`.env`** — Environment variables (chmod 600, not in Git)
-- **`docker-compose.yml`** — Two-container setup
+- **`docker-compose.yml`** — Three-container setup
+- **`dashboard-gui/`** — Public GUI assets and nginx proxy template
 - **`.gitignore`** — Prevents secret commits
 - **`credentials.txt`** — Dashboard login info (chmod 600)
 
@@ -266,7 +271,7 @@ sudo journalctl -u hermes-url-watcher.service -f
    - **Gemini:** https://aistudio.google.com/app/apikey (free tier)
    - **OpenAI:** https://platform.openai.com/api-keys (paid)
 
-2. **Access Hermes Dashboard:**
+2. **Access Hermes Control GUI:**
    - Open the ngrok URL from deployment output
    - Log in: `hermes` / (password from credentials.txt)
 
@@ -330,7 +335,7 @@ ngrok HTTPS/TLS encryption
     ↓
 ngrok Basic Auth Challenge (username + 24-char password)
     ↓
-Hermes Dashboard (running internally in insecure mode)
+Hermes Control GUI (public) -> Hermes API/dashboard (internal)
     ↓
 Access to LLM features, chat history, configurations
 ```
@@ -498,9 +503,9 @@ bash ~/hermes-ngrok/scripts/restart.sh                    # Restart after restor
 ## 🌐 Accessing from Different Devices
 
 **Hermes is accessible from:**
-- ✅ Your Ubuntu VM (localhost:9119)
-- ✅ Same network as VM (VM's IP:9119)
-- ✅ **Anywhere on the internet** (ngrok public URL)
+- ✅ Your Ubuntu VM (localhost:8088)
+- ✅ Same network as VM through the chosen local bind policy
+- ✅ **Anywhere on the internet** (ngrok public URL to the Control GUI)
 - ✅ Mobile phones, tablets, other computers
 - ✅ Different countries/regions
 
@@ -553,6 +558,19 @@ bash ~/hermes-ngrok/scripts/restart.sh
 ---
 
 ## 🏗️ Architecture Overview
+
+Current public route:
+
+```text
+Internet browser
+  -> ngrok HTTPS + Basic Auth
+  -> hermes-dashboard-gui:8088
+  -> /api/gateway/* proxy
+  -> hermes-agent:8642
+
+Native Hermes dashboard:
+  hermes-agent:9119 (internal/local only, not the ngrok target)
+```
 
 ```
 ┌────────────────────────────────────────────────────┐
@@ -622,7 +640,7 @@ After deployment:
 
 - [ ] Public URL accessible from browser
 - [ ] Can log in with hermes / password
-- [ ] Hermes dashboard loads
+- [ ] Hermes Control GUI loads
 - [ ] LLM provider API key obtained
 - [ ] API key added via portal or .env
 - [ ] Chat message sends successfully
@@ -681,7 +699,7 @@ If something doesn't work:
 | **RAM Required** | 1 GB minimum (2 GB recommended) |
 | **Disk Required** | 2 GB free (+ space for Hermes models) |
 | **Deployment Time** | 3-5 minutes (depending on internet) |
-| **Hermes Dashboard** | Port 9119 (HTTP locally, HTTPS via ngrok) |
+| **Hermes Control GUI** | Port 8088 (HTTP locally, HTTPS via ngrok) |
 | **Hermes API** | Port 8642 (OpenAI-compatible) |
 | **ngrok URL Type** | HTTPS encrypted (http://s to browser) |
 | **Auth Method** | ngrok Basic Auth (auto-generated password) |
