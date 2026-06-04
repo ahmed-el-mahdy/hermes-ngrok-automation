@@ -80,7 +80,7 @@ log_step()  { echo -e "\n${BOLD}${CYAN}━━━  $*  ━━━${RESET}"; }
 log_sep()   { echo -e "${DIM}──────────────────────────────────────────────────────${RESET}"; }
 
 banner() {
-  clear
+  clear 2>/dev/null || true
   echo -e "${CYAN}${BOLD}"
   cat <<'BANNER'
 
@@ -105,6 +105,21 @@ BANNER
 #  UTILITY
 # ─────────────────────────────────────────────────────────────────
 command_exists() { command -v "$1" &>/dev/null; }
+
+sudo() {
+  if command sudo -n true 2>/dev/null; then
+    command sudo "$@"
+    return
+  fi
+
+  if [[ -n "${SUDO_PASSWORD:-}" ]]; then
+    printf '%s\n' "$SUDO_PASSWORD" | command sudo -S -v
+    command sudo "$@"
+    return
+  fi
+
+  command sudo "$@"
+}
 
 gen_password() {
   # 24-char hex — safe in all shell/YAML contexts, no special chars
@@ -335,6 +350,75 @@ API_SERVER_KEY=$(gen_password)$(gen_password)
 # OPENAI_API_KEY=sk-
 EOF
   chmod 600 "$ENV_FILE"
+  log_ok ".env  ->  $ENV_FILE  (chmod 600)"
+
+  # docker-compose.yml
+  cat > "$COMPOSE_FILE" <<EOF
+services:
+  hermes-agent:
+    image: ${HERMES_IMAGE}
+    container_name: hermes-agent
+    restart: unless-stopped
+    command: gateway run
+    ports:
+      - "127.0.0.1:${HERMES_DASHBOARD_PORT}:${HERMES_DASHBOARD_PORT}"
+      - "127.0.0.1:${HERMES_API_PORT}:${HERMES_API_PORT}"
+    env_file:
+      - .env
+    environment:
+      HERMES_DASHBOARD: "1"
+      HERMES_DASHBOARD_HOST: "0.0.0.0"
+      HERMES_DASHBOARD_PORT: "${HERMES_DASHBOARD_PORT}"
+      HERMES_DASHBOARD_INSECURE: "1"
+      API_SERVER_ENABLED: "true"
+      API_SERVER_HOST: "0.0.0.0"
+      LOG_LEVEL: "\${LOG_LEVEL:-INFO}"
+      API_SERVER_KEY: "\${API_SERVER_KEY}"
+      API_SERVER_CORS_ORIGINS: "*"
+    volumes:
+      - "${HERMES_DATA_DIR}:/opt/data"
+      - "${LOGS_DIR}:/var/log/hermes"
+    networks:
+      - hermes_net
+
+  ngrok-hermes:
+    image: ${NGROK_IMAGE}
+    container_name: hermes-ngrok
+    restart: unless-stopped
+    command:
+      - http
+      - hermes-agent:${HERMES_DASHBOARD_PORT}
+      - --log=stdout
+      - --region=eu
+      - --basic-auth=\${NGROK_AUTH_USER}:\${NGROK_AUTH_PASS}
+    environment:
+      NGROK_AUTHTOKEN: "\${NGROK_AUTHTOKEN}"
+    ports:
+      - "127.0.0.1:${NGROK_MGMT_PORT}:${NGROK_MGMT_PORT}"
+    depends_on:
+      - hermes-agent
+    networks:
+      - hermes_net
+
+networks:
+  hermes_net:
+    driver: bridge
+    name: hermes_net
+EOF
+  log_ok "docker-compose.yml  ->  $COMPOSE_FILE"
+
+  # credentials.txt
+  cat > "$CREDS_FILE" <<EOF
+Hermes Dashboard Access
+
+URL: run bash ${SCRIPTS_DIR}/get-url.sh after startup
+Username: ${NGROK_AUTH_USER}
+Password: ${NGROK_AUTH_PASS}
+
+Credentials protect the ngrok public URL with HTTP Basic Auth.
+EOF
+  chmod 600 "$CREDS_FILE"
+  log_ok "credentials.txt  ->  $CREDS_FILE  (chmod 600)"
   log_ok ".env  →  $ENV_FILE  (chmod 600)"
 
   # ── .gitignore ───────────────────────────────────────────────
@@ -377,7 +461,7 @@ if [[ -n "$URL" ]]; then
   echo "      $URL"
   echo ""
   echo "  🔑  Login credentials:"
-  grep -E '^  (Username|Password):' "$CREDS" 2>/dev/null || echo "      See: $CREDS"
+  grep -E '^[[:space:]]*(Username|Password):' "$CREDS" 2>/dev/null || echo "      See: $CREDS"
 else
   echo "  ⚠   No URL found. Check services are running:"
   echo "      docker compose -f $HOME/hermes-ngrok/docker-compose.yml ps"
@@ -592,11 +676,11 @@ pull_images() {
   log_step "Step 9/10 — Pulling Docker Images"
 
   log_info "Pulling $HERMES_IMAGE ..."
-  docker pull "$HERMES_IMAGE"
+  sudo docker pull "$HERMES_IMAGE"
   log_ok "Hermes Agent image ready"
 
   log_info "Pulling $NGROK_IMAGE ..."
-  docker pull "$NGROK_IMAGE"
+  sudo docker pull "$NGROK_IMAGE"
   log_ok "ngrok image ready"
 }
 
@@ -609,10 +693,10 @@ start_services() {
   cd "$PROJECT_DIR"
 
   log_info "Starting docker compose stack..."
-  docker compose up -d
+  sudo docker compose up -d
 
   echo ""
-  docker compose ps
+  sudo docker compose ps
   echo ""
 
   wait_for_port "$HERMES_DASHBOARD_PORT" "Hermes Dashboard" 40 3 || true
