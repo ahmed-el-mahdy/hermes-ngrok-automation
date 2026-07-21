@@ -19,14 +19,24 @@ services:
       API_SERVER_KEY: "${API_SERVER_KEY}"
       API_SERVER_CORS_ORIGINS: "*"
       LOG_LEVEL: "${LOG_LEVEL:-INFO}"
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
+      TELEGRAM_ALLOWED_USERS: "${TELEGRAM_ALLOWED_USERS:-}"
+      TELEGRAM_GROUP_ALLOWED_USERS: "${TELEGRAM_GROUP_ALLOWED_USERS:-}"
+      TELEGRAM_GROUP_ALLOWED_CHATS: "${TELEGRAM_GROUP_ALLOWED_CHATS:-}"
+      TELEGRAM_REQUIRE_MENTION: "${TELEGRAM_REQUIRE_MENTION:-true}"
+      TELEGRAM_ALLOW_ALL_USERS: "false"
+      GATEWAY_ALLOW_ALL_USERS: "false"
     volumes:
-      - ./hermes_data:/opt/data
-      - ./logs:/var/log/hermes
+      - "${HERMES_DATA_DIR:-/home/cyber/.hermes}:/opt/data"
+      - "${HERMES_LOG_DIR:-/home/cyber/hermes-ngrok/logs}:/var/log/hermes"
     networks:
       - hermes_net
 
   open-webui:
-    image: ghcr.io/open-webui/open-webui:main
+    build:
+      context: .
+      dockerfile: Dockerfile.open-webui
+    image: hermes-open-webui:local
     container_name: hermes-open-webui
     restart: unless-stopped
     ports:
@@ -46,8 +56,10 @@ services:
       DEFAULT_MODELS: "hermes-agent"
     volumes:
       - open-webui-data:/app/backend/data
+      - "${HERMES_WORKSPACE_DIR:-/home/cyber/hermes_workspace}:/app/backend/data/hermes_workspace"
     depends_on:
-      - hermes-agent
+      hermes-agent:
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/ >/dev/null 2>&1 || wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1"]
       interval: 20s
@@ -70,7 +82,8 @@ services:
     ports:
       - "127.0.0.1:4040:4040"
     depends_on:
-      - open-webui
+      open-webui:
+        condition: service_healthy
     networks:
       - hermes_net
 

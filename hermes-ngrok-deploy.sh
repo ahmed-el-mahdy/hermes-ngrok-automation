@@ -1,925 +1,145 @@
 #!/usr/bin/env bash
-# =============================================================================
-#  hermes-ngrok-deploy.sh  —  v2  (confirmed config)
-#  Hermes Agent (NousResearch) + ngrok on Ubuntu Minimal Server
-#
-#  Confirmed settings:
-#    ✔  ngrok FREE plan  (random URL, watcher tracks changes automatically)
-#    ✔  VM in NAT mode   (ngrok handles outbound tunnel — no port-forward needed)
-#    ✔  Open WebUI authentication (no ngrok browser auth popup)
-#    ✔  LLM: OpenRouter + Google Gemini API (configure later via web portal)
-#    ✔  Open WebUI prewired to Hermes' OpenAI-compatible API
-#
-#  Security model:
-#    Internet → ngrok HTTPS tunnel → Open WebUI (port 3000)
-#    Open WebUI connects internally to Hermes at hermes-agent:8642/v1.
-#
-#  Pattern mirrors n8n-ngrok-automation project:
-#    Three containers on shared bridge network  (hermes-net)
-#    ngrok sidecar tunnels Open WebUI to internet
-#    URL watcher service tracks ngrok URL changes
-#
-#  Usage:
-#    chmod +x hermes-ngrok-deploy.sh && ./hermes-ngrok-deploy.sh
-#    ./hermes-ngrok-deploy.sh --status
-#    ./hermes-ngrok-deploy.sh --url
-#    ./hermes-ngrok-deploy.sh --uninstall
-# =============================================================================
-
 set -euo pipefail
 
-# ─────────────────────────────────────────────────────────────────
-#  CONSTANTS
-# ─────────────────────────────────────────────────────────────────
-readonly PROJECT_DIR="$HOME/hermes-ngrok"
-readonly HERMES_DATA_DIR="$HOME/.hermes"
-readonly COMPOSE_FILE="$PROJECT_DIR/docker-compose.yml"
-readonly ENV_FILE="$PROJECT_DIR/.env"
-readonly CREDS_FILE="$PROJECT_DIR/credentials.txt"
-readonly SCRIPTS_DIR="$PROJECT_DIR/scripts"
-readonly LOGS_DIR="$PROJECT_DIR/logs"
-readonly URL_FILE="$PROJECT_DIR/current-url.txt"
-readonly WATCHER_LOG="$LOGS_DIR/url-watcher.log"
-readonly WATCHER_SERVICE="hermes-url-watcher"
-readonly NGROK_API="http://localhost:4040/api/tunnels"
+SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="${HERMES_PROJECT_DIR:-$HOME/hermes-ngrok}"
+ENV_FILE="$PROJECT_DIR/.env"
+COMPOSE_FILE="$PROJECT_DIR/docker-compose.yml"
+CREDS_FILE="$PROJECT_DIR/credentials.txt"
 
-# Docker images
-readonly HERMES_IMAGE="nousresearch/hermes-agent:latest"
-readonly NGROK_IMAGE="ngrok/ngrok:latest"
-readonly OPEN_WEBUI_IMAGE="ghcr.io/open-webui/open-webui:main"
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+info() { printf '[INFO] %s\n' "$*"; }
+ok() { printf '[OK] %s\n' "$*"; }
 
-# Ports
-readonly HERMES_DASHBOARD_PORT="9119"
-readonly HERMES_API_PORT="8642"
-readonly OPEN_WEBUI_PORT="3000"
-readonly NGROK_MGMT_PORT="4040"
-
-# ─────────────────────────────────────────────────────────────────
-#  COLORS
-# ─────────────────────────────────────────────────────────────────
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-MAGENTA='\033[0;35m'
-BOLD='\033[1m'
-DIM='\033[2m'
-RESET='\033[0m'
-
-# ─────────────────────────────────────────────────────────────────
-#  LOGGING
-# ─────────────────────────────────────────────────────────────────
-log_info()  { echo -e "${BLUE}[INFO]${RESET}  $*"; }
-log_ok()    { echo -e "${GREEN}[  OK ]${RESET} $*"; }
-log_warn()  { echo -e "${YELLOW}[WARN]${RESET}  $*"; }
-log_error() { echo -e "${RED}[ERROR]${RESET} $*" >&2; }
-log_step()  { echo -e "\n${BOLD}${CYAN}━━━  $*  ━━━${RESET}"; }
-log_sep()   { echo -e "${DIM}──────────────────────────────────────────────────────${RESET}"; }
-
-banner() {
-  clear 2>/dev/null || true
-  echo -e "${CYAN}${BOLD}"
-  cat <<'BANNER'
-
-   ██╗  ██╗███████╗██████╗ ███╗   ███╗███████╗███████╗
-   ██║  ██║██╔════╝██╔══██╗████╗ ████║██╔════╝██╔════╝
-   ███████║█████╗  ██████╔╝██╔████╔██║█████╗  ███████║
-   ██╔══██║██╔══╝  ██╔══██╗██║╚██╔╝██║██╔══╝  ╚════██║
-   ██║  ██║███████╗██║  ██║██║ ╚═╝ ██║███████╗███████║
-   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝╚══════╝
-
-BANNER
-  echo -e "${RESET}"
-  echo -e "  ${BOLD}Hermes Agent  +  ngrok  —  Ubuntu Minimal Server${RESET}"
-  echo -e "  ${DIM}NousResearch Hermes Agent  |  Docker  |  ngrok Tunnel${RESET}"
-  echo -e "  ${DIM}NAT VM  ·  Free ngrok plan  ·  Basic-Auth protected  ·  OpenRouter + Gemini${RESET}"
-  echo ""
-  log_sep
-  echo ""
+compose() {
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
 }
 
-# ─────────────────────────────────────────────────────────────────
-#  UTILITY
-# ─────────────────────────────────────────────────────────────────
-command_exists() { command -v "$1" &>/dev/null; }
-
-sudo() {
-  if command sudo -n true 2>/dev/null; then
-    command sudo "$@"
-    return
-  fi
-
-  if [[ -n "${SUDO_PASSWORD:-}" ]]; then
-    printf '%s\n' "$SUDO_PASSWORD" | command sudo -S -v
-    command sudo "$@"
-    return
-  fi
-
-  command sudo "$@"
+random_secret() {
+  openssl rand -hex "${1:-24}"
 }
 
-gen_password() {
-  # 24-char hex — safe in all shell/YAML contexts, no special chars
-  openssl rand -hex 12 2>/dev/null \
-    || head -c 24 /dev/urandom | xxd -p 2>/dev/null \
-    || cat /proc/sys/kernel/random/uuid 2>/dev/null | tr -d '-' | head -c 24 \
-    || echo "changeme$(date +%s)"
+env_value() {
+  local key="$1"
+  [[ -f "$ENV_FILE" ]] || return 0
+  sed -n "s/^${key}=//p" "$ENV_FILE" | tail -n 1
 }
 
-get_env_value() {
-  local key="$1" file="${2:-$ENV_FILE}"
-  [[ -f "$file" ]] || return 0
-  grep -E "^${key}=" "$file" 2>/dev/null | tail -n 1 | cut -d= -f2-
+current_url() {
+  curl -fsS http://127.0.0.1:4040/api/tunnels 2>/dev/null | python3 -c \
+    "import json,sys; d=json.load(sys.stdin); print(next((x['public_url'] for x in d.get('tunnels',[]) if x.get('proto')=='https'), ''))" \
+    2>/dev/null || true
 }
 
-write_optional_env() {
-  local key="$1" placeholder="$2" value
-  local preserved_var="PRESERVE_${key}"
-  value="${!preserved_var:-}"
-  [[ -n "${value:-}" ]] || value="$(get_env_value "$key" || true)"
-  if [[ -n "${value:-}" ]]; then
-    printf '%s=%s\n' "$key" "$value"
-  else
-    printf '# %s=%s\n' "$key" "$placeholder"
-  fi
+status() {
+  [[ -f "$COMPOSE_FILE" && -f "$ENV_FILE" ]] || die "No deployment found at $PROJECT_DIR"
+  compose ps
+  printf 'Public URL: %s\n' "$(current_url)"
 }
 
-get_ngrok_url() {
-  curl -sf "$NGROK_API" 2>/dev/null \
-    | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['tunnels'][0]['public_url'])" \
-    2>/dev/null || echo ""
-}
-
-wait_for_port() {
-  local port=$1 label=$2 max=${3:-40} delay=${4:-3}
-  log_info "Waiting for $label (port $port)..."
-  for ((i=1; i<=max; i++)); do
-    if nc -z 127.0.0.1 "$port" 2>/dev/null; then
-      log_ok "$label is up"
-      return 0
-    fi
-    printf "."
-    sleep "$delay"
-  done
-  echo ""
-  log_warn "$label did not respond after $((max * delay))s — check logs"
-  return 1
-}
-
-require_sudo() {
-  [[ $EUID -eq 0 ]] && return 0
-  log_warn "Requesting sudo for this step..."
-  sudo -v || { log_error "Cannot get sudo. Exiting."; exit 1; }
-}
-
-# ─────────────────────────────────────────────────────────────────
-#  STEP 1 — PREREQUISITES
-# ─────────────────────────────────────────────────────────────────
-check_prerequisites() {
-  log_step "Step 1/10 — Checking Prerequisites"
-
-  [[ -f /etc/os-release ]] && { source /etc/os-release; log_info "OS: $PRETTY_NAME"; }
-
-  INSTALL_DOCKER=false
-
-  if command_exists docker; then
-    log_ok "Docker $(docker --version | grep -oP '\d+\.\d+\.\d+' | head -1)"
-  else
-    log_warn "Docker not found — will install"
-    INSTALL_DOCKER=true
-  fi
-
-  if docker compose version &>/dev/null 2>&1; then
-    log_ok "Docker Compose v2 found"
-  else
-    log_warn "Docker Compose v2 not found — will install with Docker"
-    INSTALL_DOCKER=true
-  fi
-
-  for pkg in curl python3; do
-    if command_exists "$pkg"; then
-      log_ok "$pkg found"
-    else
-      log_info "Installing $pkg..."
-      sudo apt-get install -y "$pkg" -qq
-    fi
-  done
-
-  if command_exists nc; then
-    log_ok "netcat found"
-  else
-    sudo apt-get install -y netcat-openbsd -qq
-    log_ok "netcat installed"
-  fi
-
-  if command_exists openssl; then
-    log_ok "openssl found"
-  else
-    sudo apt-get install -y openssl -qq
-    log_ok "openssl installed"
-  fi
-}
-
-# ─────────────────────────────────────────────────────────────────
-#  STEP 2 — INSTALL DOCKER
-# ─────────────────────────────────────────────────────────────────
-install_docker() {
-  [[ "$INSTALL_DOCKER" == "false" ]] && { log_step "Step 2/10 — Docker Already Installed (skip)"; return 0; }
-
-  log_step "Step 2/10 — Installing Docker Engine"
-  require_sudo
-
-  log_info "Removing old Docker packages..."
-  sudo apt-get remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
-
-  sudo apt-get update -qq
-  sudo apt-get install -y -qq \
-    ca-certificates curl gnupg lsb-release
-
-  log_info "Adding Docker GPG key and repository..."
-  sudo install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-    | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-  sudo chmod a+r /etc/apt/keyrings/docker.gpg
-  echo \
-    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
-    https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
-    | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-  sudo apt-get update -qq
-  sudo apt-get install -y \
-    docker-ce docker-ce-cli containerd.io \
-    docker-buildx-plugin docker-compose-plugin
-
-  sudo usermod -aG docker "$USER"
-  sudo systemctl enable --now docker
-
-  log_ok "Docker Engine installed and started"
-  log_warn "If docker commands fail later, run: newgrp docker  (group membership refresh)"
-}
-
-# ─────────────────────────────────────────────────────────────────
-#  STEP 3 — COLLECT CONFIG
-# ─────────────────────────────────────────────────────────────────
-collect_config() {
-  log_step "Step 3/10 — Configuration"
-
-  # ── ngrok auth token ──
-  echo ""
-  echo -e "  ${BOLD}ngrok Auth Token${RESET}"
-  echo -e "  ${DIM}Get yours free → https://dashboard.ngrok.com/get-started/your-authtoken${RESET}"
-  echo ""
-
-  # Re-use existing token if available
-  if [[ -f "$ENV_FILE" ]]; then
-    _existing=$(grep '^NGROK_AUTHTOKEN=' "$ENV_FILE" 2>/dev/null | cut -d= -f2 || true)
-    if [[ -n "${_existing:-}" && "$_existing" != "PASTE_YOUR_NGROK_TOKEN_HERE" ]]; then
-      NGROK_AUTHTOKEN="$_existing"
-      log_ok "Reusing existing ngrok token from .env"
-    fi
-  fi
-
-  if [[ -z "${NGROK_AUTHTOKEN:-}" ]]; then
-    read -rp "  Enter your ngrok Auth Token: " NGROK_AUTHTOKEN
-    if [[ -z "${NGROK_AUTHTOKEN:-}" ]]; then
-      log_warn "Token left blank — placeholder written. Edit $ENV_FILE before starting."
-      NGROK_AUTHTOKEN="PASTE_YOUR_NGROK_TOKEN_HERE"
-    fi
-  fi
-
-  API_SERVER_KEY="$(get_env_value API_SERVER_KEY || true)"
-  if [[ -n "${API_SERVER_KEY:-}" ]]; then
-    log_ok "Reusing existing Hermes API server key from .env"
-  else
-    log_info "Generating secure Hermes API server key..."
-    API_SERVER_KEY="$(gen_password)$(gen_password)"
-    log_ok "Hermes API server key generated"
-  fi
-
-  OPEN_WEBUI_ADMIN_EMAIL="$(get_env_value OPEN_WEBUI_ADMIN_EMAIL || true)"
-  [[ -n "${OPEN_WEBUI_ADMIN_EMAIL:-}" ]] || OPEN_WEBUI_ADMIN_EMAIL="admin@hermes.local"
-
-  OPEN_WEBUI_ADMIN_PASSWORD="$(get_env_value OPEN_WEBUI_ADMIN_PASSWORD || true)"
-  if [[ -n "${OPEN_WEBUI_ADMIN_PASSWORD:-}" ]]; then
-    log_ok "Reusing existing Open WebUI admin password from .env"
-  else
-    log_info "Generating Open WebUI admin password..."
-    OPEN_WEBUI_ADMIN_PASSWORD="$(gen_password)"
-    log_ok "Open WebUI admin password generated"
-  fi
-
-  OPEN_WEBUI_SECRET_KEY="$(get_env_value OPEN_WEBUI_SECRET_KEY || true)"
-  if [[ -n "${OPEN_WEBUI_SECRET_KEY:-}" ]]; then
-    log_ok "Reusing existing Open WebUI secret key from .env"
-  else
-    OPEN_WEBUI_SECRET_KEY="$(gen_password)$(gen_password)"
-    log_ok "Open WebUI secret key generated"
-  fi
-
-  for key in OPENROUTER_API_KEY GOOGLE_API_KEY GEMINI_API_KEY ANTHROPIC_API_KEY OPENAI_API_KEY; do
-    printf -v "PRESERVE_${key}" '%s' "$(get_env_value "$key" || true)"
-  done
-
-  echo ""
-  log_ok "Config ready"
-  log_info "ngrok token:        ${NGROK_AUTHTOKEN:0:8}****"
-  log_info "Open WebUI admin:   ${OPEN_WEBUI_ADMIN_EMAIL}"
-}
-
-# ─────────────────────────────────────────────────────────────────
-#  STEP 4 — DIRECTORY STRUCTURE
-# ─────────────────────────────────────────────────────────────────
-create_directories() {
-  log_step "Step 4/10 — Creating Directory Structure"
-
-  mkdir -p "$PROJECT_DIR" "$SCRIPTS_DIR" "$LOGS_DIR" "$HERMES_DATA_DIR"
-  chmod 700 "$HERMES_DATA_DIR" 2>/dev/null || sudo chmod 700 "$HERMES_DATA_DIR"
-  if [[ -d "$PROJECT_DIR/dashboard-gui" ]]; then
-    rm -rf "$PROJECT_DIR/dashboard-gui"
-    log_ok "Removed obsolete custom dashboard GUI directory"
-  fi
-
-  log_ok "$PROJECT_DIR"
-  log_ok "$HERMES_DATA_DIR  (chmod 700)"
-  log_ok "$SCRIPTS_DIR"
-  log_ok "$LOGS_DIR"
-}
-
-# ─────────────────────────────────────────────────────────────────
-#  STEP 5 — GENERATE CONFIG FILES
-# ─────────────────────────────────────────────────────────────────
-generate_configs() {
-  log_step "Step 5/10 — Generating Configuration Files"
-
-  # ── .env ─────────────────────────────────────────────────────
-  cat > "$ENV_FILE" <<EOF
-# =================================================================
-# Hermes Agent + ngrok  —  Environment Variables
-# DO NOT commit this file to git  |  chmod 600 enforced by script
-# =================================================================
-
-# ── ngrok ────────────────────────────────────────────────────────
-NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
-
-# ── Service ports + Hermes Gateway API (preserved on redeploy) ───
-HERMES_DASHBOARD_PORT=${HERMES_DASHBOARD_PORT}
-HERMES_API_PORT=${HERMES_API_PORT}
-OPEN_WEBUI_PORT=${OPEN_WEBUI_PORT}
-API_SERVER_KEY=${API_SERVER_KEY}
-
-# ── Open WebUI (prebuilt dashboard) ──────────────────────────────
-OPEN_WEBUI_NAME=Hermes Open WebUI
-OPEN_WEBUI_ADMIN_EMAIL=${OPEN_WEBUI_ADMIN_EMAIL}
-OPEN_WEBUI_ADMIN_PASSWORD=${OPEN_WEBUI_ADMIN_PASSWORD}
-OPEN_WEBUI_SECRET_KEY=${OPEN_WEBUI_SECRET_KEY}
-OPEN_WEBUI_PUBLIC_URL=
-
-# ── LLM API Keys  (add after first web portal access) ────────────
-# Provider 1 — OpenRouter  (free tier available)
-# Get key → https://openrouter.ai/keys
-$(write_optional_env OPENROUTER_API_KEY sk-or-v1-)
-
-# Provider 2 — Google Gemini  (free tier available)
-# Get key → https://aistudio.google.com/app/apikey
-$(write_optional_env GOOGLE_API_KEY AIza)
-$(write_optional_env GEMINI_API_KEY AIza)
-
-# Provider 3 — Anthropic  (optional)
-$(write_optional_env ANTHROPIC_API_KEY sk-ant-)
-
-# Provider 4 — OpenAI  (optional)
-$(write_optional_env OPENAI_API_KEY sk-)
-EOF
-  chmod 600 "$ENV_FILE"
-  log_ok ".env  ->  $ENV_FILE  (chmod 600)"
-
-  # docker-compose.yml
-  cat > "$COMPOSE_FILE" <<EOF
-services:
-  hermes-agent:
-    image: ${HERMES_IMAGE}
-    container_name: hermes-agent
-    restart: unless-stopped
-    command: gateway run
-    ports:
-      - "127.0.0.1:${HERMES_DASHBOARD_PORT}:${HERMES_DASHBOARD_PORT}"
-      - "127.0.0.1:${HERMES_API_PORT}:${HERMES_API_PORT}"
-    env_file:
-      - .env
-    environment:
-      HERMES_DASHBOARD: "1"
-      HERMES_DASHBOARD_HOST: "0.0.0.0"
-      HERMES_DASHBOARD_PORT: "${HERMES_DASHBOARD_PORT}"
-      HERMES_DASHBOARD_INSECURE: "1"
-      API_SERVER_ENABLED: "true"
-      API_SERVER_HOST: "0.0.0.0"
-      LOG_LEVEL: "\${LOG_LEVEL:-INFO}"
-      API_SERVER_KEY: "\${API_SERVER_KEY}"
-      API_SERVER_CORS_ORIGINS: "*"
-    volumes:
-      - "${HERMES_DATA_DIR}:/opt/data"
-      - "${LOGS_DIR}:/var/log/hermes"
-    networks:
-      - hermes_net
-
-  open-webui:
-    image: ${OPEN_WEBUI_IMAGE}
-    container_name: hermes-open-webui
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:${OPEN_WEBUI_PORT}:8080"
-    env_file:
-      - .env
-    environment:
-      WEBUI_NAME: "\${OPEN_WEBUI_NAME:-Hermes Open WebUI}"
-      WEBUI_SECRET_KEY: "\${OPEN_WEBUI_SECRET_KEY}"
-      WEBUI_URL: "\${OPEN_WEBUI_PUBLIC_URL:-}"
-      WEBUI_ADMIN_EMAIL: "\${OPEN_WEBUI_ADMIN_EMAIL:-admin@hermes.local}"
-      WEBUI_ADMIN_PASSWORD: "\${OPEN_WEBUI_ADMIN_PASSWORD}"
-      ENABLE_SIGNUP: "false"
-      ENABLE_OPENAI_API: "true"
-      OPENAI_API_BASE_URL: "http://hermes-agent:${HERMES_API_PORT}/v1"
-      OPENAI_API_KEY: "\${API_SERVER_KEY}"
-      DEFAULT_MODELS: "hermes-agent"
-    volumes:
-      - open-webui-data:/app/backend/data
-    depends_on:
-      - hermes-agent
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/ >/dev/null 2>&1 || wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1"]
-      interval: 20s
-      timeout: 10s
-      retries: 10
-    networks:
-      - hermes_net
-
-  ngrok-hermes:
-    image: ${NGROK_IMAGE}
-    container_name: hermes-ngrok
-    restart: unless-stopped
-    command:
-      - http
-      - open-webui:8080
-      - --log=stdout
-      - --region=eu
-    environment:
-      NGROK_AUTHTOKEN: "\${NGROK_AUTHTOKEN}"
-    ports:
-      - "127.0.0.1:${NGROK_MGMT_PORT}:${NGROK_MGMT_PORT}"
-    depends_on:
-      - open-webui
-    networks:
-      - hermes_net
-
-volumes:
-  open-webui-data:
-
-networks:
-  hermes_net:
-    driver: bridge
-    name: hermes_net
-EOF
-  log_ok "docker-compose.yml  ->  $COMPOSE_FILE"
-
-  # credentials.txt
-  cat > "$CREDS_FILE" <<EOF
-Hermes Open WebUI Access
-
-URL: run bash ${SCRIPTS_DIR}/get-url.sh after startup
-
-Open WebUI email: ${OPEN_WEBUI_ADMIN_EMAIL}
-Open WebUI password: ${OPEN_WEBUI_ADMIN_PASSWORD}
-
-ngrok exposes the public HTTPS URL without a browser auth popup. Open WebUI login protects the dashboard and is preconfigured to use Hermes at http://hermes-agent:${HERMES_API_PORT}/v1.
-EOF
-  chmod 600 "$CREDS_FILE"
-  log_ok "credentials.txt  ->  $CREDS_FILE  (chmod 600)"
-  log_ok ".env  →  $ENV_FILE  (chmod 600)"
-
-  # ── .gitignore ───────────────────────────────────────────────
-  cat > "$PROJECT_DIR/.gitignore" <<'EOF'
-.env
-credentials.txt
-current-url.txt
-logs/
-*.log
-EOF
-  log_ok ".gitignore created"
-}
-
-# ─────────────────────────────────────────────────────────────────
-#  STEP 6 — GENERATE HELPER SCRIPTS
-# ─────────────────────────────────────────────────────────────────
-generate_scripts() {
-  log_step "Step 6/10 — Generating Helper Scripts"
-
-  # ── get-url.sh ───────────────────────────────────────────────
-  cat > "$SCRIPTS_DIR/get-url.sh" <<'GETURL_EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-URL_FILE="$HOME/hermes-ngrok/current-url.txt"
-NGROK_API="http://localhost:4040/api/tunnels"
-CREDS="$HOME/hermes-ngrok/credentials.txt"
-
-if [[ -f "$URL_FILE" ]]; then
-  URL=$(cat "$URL_FILE")
-else
-  URL=$(curl -sf "$NGROK_API" 2>/dev/null \
-    | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['tunnels'][0]['public_url'])" \
-    2>/dev/null || echo "")
-  [[ -n "$URL" ]] && echo "$URL" > "$URL_FILE"
-fi
-
-echo ""
-if [[ -n "$URL" ]]; then
-  echo "  🌐  Hermes Open WebUI URL:"
-  echo "      $URL"
-  echo ""
-  echo "  🔑  Login credentials:"
-  grep -E '^[[:space:]]*(Open WebUI (email|password):)' "$CREDS" 2>/dev/null || echo "      See: $CREDS"
-else
-  echo "  ⚠   No URL found. Check services are running:"
-  echo "      docker compose -f $HOME/hermes-ngrok/docker-compose.yml ps"
-fi
-echo ""
-GETURL_EOF
-  chmod +x "$SCRIPTS_DIR/get-url.sh"
-  log_ok "get-url.sh"
-
-  # ── start.sh ─────────────────────────────────────────────────
-  cat > "$SCRIPTS_DIR/start.sh" <<'STARTEOF'
-#!/usr/bin/env bash
-set -euo pipefail
-echo "Starting Hermes Agent + ngrok..."
-cd "$HOME/hermes-ngrok"
-docker compose up -d
-echo "Waiting for ngrok tunnel..."
-sleep 12
-bash "$HOME/hermes-ngrok/scripts/get-url.sh"
-STARTEOF
-  chmod +x "$SCRIPTS_DIR/start.sh"
-  log_ok "start.sh"
-
-  # ── stop.sh ──────────────────────────────────────────────────
-  cat > "$SCRIPTS_DIR/stop.sh" <<'STOPEOF'
-#!/usr/bin/env bash
-set -euo pipefail
-echo "Stopping Hermes Agent + ngrok..."
-cd "$HOME/hermes-ngrok"
-docker compose down
-echo "All services stopped."
-STOPEOF
-  chmod +x "$SCRIPTS_DIR/stop.sh"
-  log_ok "stop.sh"
-
-  # ── restart.sh ───────────────────────────────────────────────
-  cat > "$SCRIPTS_DIR/restart.sh" <<'RESTARTEOF'
-#!/usr/bin/env bash
-set -euo pipefail
-echo "Restarting all services (data preserved)..."
-cd "$HOME/hermes-ngrok"
-docker compose restart
-echo "Waiting for ngrok tunnel..."
-sleep 12
-bash "$HOME/hermes-ngrok/scripts/get-url.sh"
-RESTARTEOF
-  chmod +x "$SCRIPTS_DIR/restart.sh"
-  log_ok "restart.sh"
-
-  # ── status.sh ────────────────────────────────────────────────
-  cat > "$SCRIPTS_DIR/status.sh" <<'STATUSEOF'
-#!/usr/bin/env bash
-set -euo pipefail
-cd "$HOME/hermes-ngrok"
-echo ""
-echo "═══════════════════════════════════════════"
-echo "  Container Status"
-echo "═══════════════════════════════════════════"
-docker compose ps
-echo ""
-echo "═══════════════════════════════════════════"
-echo "  Current Access URL"
-echo "═══════════════════════════════════════════"
-bash "$HOME/hermes-ngrok/scripts/get-url.sh"
-echo ""
-echo "═══════════════════════════════════════════"
-echo "  URL Watcher Service"
-echo "═══════════════════════════════════════════"
-sudo systemctl status hermes-url-watcher --no-pager -l 2>/dev/null || \
-  echo "  Watcher not running as systemd service"
-echo ""
-echo "═══════════════════════════════════════════"
-echo "  Recent Hermes Logs (last 25 lines)"
-echo "═══════════════════════════════════════════"
-docker compose logs --tail=25 hermes-agent
-STATUSEOF
-  chmod +x "$SCRIPTS_DIR/status.sh"
-  log_ok "status.sh"
-
-  log_ok "All helper scripts created in $SCRIPTS_DIR"
-}
-
-# ─────────────────────────────────────────────────────────────────
-#  STEP 7 — GENERATE URL WATCHER
-# ─────────────────────────────────────────────────────────────────
-generate_watcher() {
-  log_step "Step 7/10 — Creating URL Watcher Script"
-
-  cat > "$SCRIPTS_DIR/url-watcher.sh" <<'WATCHER_EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-
-PROJECT_DIR="$HOME/hermes-ngrok"
-URL_FILE="$PROJECT_DIR/current-url.txt"
-LOG_FILE="$PROJECT_DIR/logs/url-watcher.log"
-NGROK_API="http://localhost:4040/api/tunnels"
-POLL_INTERVAL=30
-MAX_STARTUP_WAIT=120
-
-GREEN='\033[0;32m' CYAN='\033[0;36m' YELLOW='\033[1;33m'
-BOLD='\033[1m' RESET='\033[0m'
-
-ts() { date '+%Y-%m-%d %H:%M:%S'; }
-log() { echo "[$(ts)] $*" | tee -a "$LOG_FILE"; }
-
-get_url() {
-  local resp url
-  resp=$(curl -sf "$NGROK_API" 2>/dev/null) || { echo ""; return; }
-  url=$(echo "$resp" \
-    | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['tunnels'][0]['public_url'])" \
-    2>/dev/null) || { echo ""; return; }
-  echo "$url"
-}
-
-print_url_banner() {
-  local url="$1"
-  echo -e ""
-  echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════════════════════╗${RESET}"
-  echo -e "${CYAN}${BOLD}║         HERMES OPEN WEBUI  —  LIVE ACCESS URL             ║${RESET}"
-  echo -e "${CYAN}${BOLD}╠══════════════════════════════════════════════════════════╣${RESET}"
-  echo -e "${CYAN}${BOLD}║${RESET}  🌐  ${GREEN}${BOLD}${url}${RESET}"
-  echo -e "${CYAN}${BOLD}╠══════════════════════════════════════════════════════════╣${RESET}"
-  echo -e "${CYAN}${BOLD}║${RESET}  🔑  Login: see  ${YELLOW}~/hermes-ngrok/credentials.txt${RESET}"
-  echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════════════════════╝${RESET}"
-  echo -e ""
-}
-
-mkdir -p "$(dirname "$LOG_FILE")"
-log "━━━ URL Watcher started (poll every ${POLL_INTERVAL}s) ━━━"
-
-log "Waiting for ngrok management API..."
-WAIT=0
-until curl -sf "$NGROK_API" &>/dev/null; do
-  sleep 2; WAIT=$((WAIT + 2))
-  if (( WAIT >= MAX_STARTUP_WAIT )); then
-    log "ERROR: ngrok API not responding after ${MAX_STARTUP_WAIT}s — is the container up?"
-    log "  Check: docker compose -f $PROJECT_DIR/docker-compose.yml ps"
-    break
-  fi
-done
-log "ngrok management API is up"
-
-LAST_URL=""
-while true; do
-  CURRENT_URL=$(get_url)
-
-  if [[ -n "$CURRENT_URL" && "$CURRENT_URL" != "null" ]]; then
-    if [[ "$CURRENT_URL" != "$LAST_URL" ]]; then
-      if [[ -n "$LAST_URL" ]]; then
-        log "URL CHANGED  →  $LAST_URL  →  $CURRENT_URL"
-      else
-        log "URL ACQUIRED →  $CURRENT_URL"
-      fi
-      echo "$CURRENT_URL" > "$URL_FILE"
-      LAST_URL="$CURRENT_URL"
-      print_url_banner "$CURRENT_URL"
-    fi
-  else
-    log "WARNING: Could not read ngrok URL — ngrok may be restarting..."
-  fi
-
-  sleep "$POLL_INTERVAL"
-done
-WATCHER_EOF
-  chmod +x "$SCRIPTS_DIR/url-watcher.sh"
-  log_ok "url-watcher.sh"
-}
-
-# ─────────────────────────────────────────────────────────────────
-#  STEP 8 — SYSTEMD SERVICE
-# ─────────────────────────────────────────────────────────────────
-setup_watcher_service() {
-  log_step "Step 8/10 — Installing URL Watcher as systemd Service"
-  require_sudo
-
-  local svc="/etc/systemd/system/${WATCHER_SERVICE}.service"
-
-  sudo tee "$svc" > /dev/null <<SVCEOF
-[Unit]
-Description=Hermes Agent — ngrok URL Watcher
-Documentation=n8n-ngrok-automation pattern
-After=network-online.target docker.service
-Requires=docker.service
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=${USER}
-WorkingDirectory=${PROJECT_DIR}
-ExecStart=${SCRIPTS_DIR}/url-watcher.sh
-Restart=on-failure
-RestartSec=15
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=hermes-url-watcher
-ExecStartPre=/bin/sleep 15
-
-[Install]
-WantedBy=multi-user.target
-SVCEOF
-
-  sudo systemctl daemon-reload
-  sudo systemctl enable "${WATCHER_SERVICE}"
-  log_ok "systemd service registered: ${WATCHER_SERVICE}"
-  log_ok "Service auto-starts on VM boot"
-}
-
-# ─────────────────────────────────────────────────────────────────
-#  STEP 9 — PULL DOCKER IMAGES
-# ─────────────────────────────────────────────────────────────────
-pull_images() {
-  log_step "Step 9/10 — Pulling Docker Images"
-
-  if sudo docker image inspect "$HERMES_IMAGE" >/dev/null 2>&1; then
-    log_ok "Hermes Agent image already present"
-  else
-    log_info "Pulling $HERMES_IMAGE ..."
-    sudo docker pull "$HERMES_IMAGE"
-    log_ok "Hermes Agent image ready"
-  fi
-
-  if sudo docker image inspect "$NGROK_IMAGE" >/dev/null 2>&1; then
-    log_ok "ngrok image already present"
-  else
-    log_info "Pulling $NGROK_IMAGE ..."
-    sudo docker pull "$NGROK_IMAGE"
-    log_ok "ngrok image ready"
-  fi
-
-  if sudo docker image inspect "$OPEN_WEBUI_IMAGE" >/dev/null 2>&1; then
-    log_ok "Open WebUI image already present"
-  else
-    log_info "Pulling $OPEN_WEBUI_IMAGE ..."
-    sudo docker pull "$OPEN_WEBUI_IMAGE"
-    log_ok "Open WebUI image ready"
-  fi
-}
-
-# ─────────────────────────────────────────────────────────────────
-#  STEP 10 — START SERVICES & DISPLAY INFO
-# ─────────────────────────────────────────────────────────────────
-start_services() {
-  log_step "Step 10/10 — Starting All Services"
-
-  cd "$PROJECT_DIR"
-
-  log_info "Starting docker compose stack..."
-  sudo docker compose up -d --remove-orphans
-
-  echo ""
-  sudo docker compose ps
-  echo ""
-
-  wait_for_port "$HERMES_DASHBOARD_PORT" "Hermes internal dashboard" 40 3 || true
-  wait_for_port "$OPEN_WEBUI_PORT"       "Open WebUI"                40 3 || true
-  wait_for_port "$NGROK_MGMT_PORT"       "ngrok Mgmt API"   20 2 || true
-
-  log_info "Starting URL watcher service..."
-  if sudo systemctl start "${WATCHER_SERVICE}" 2>/dev/null; then
-    log_ok "systemd URL watcher started"
-  else
-    log_warn "systemd start failed — starting watcher in background"
-    mkdir -p "$LOGS_DIR"
-    nohup bash "$SCRIPTS_DIR/url-watcher.sh" >> "$WATCHER_LOG" 2>&1 &
-    echo $! > "$PROJECT_DIR/url-watcher.pid"
-    log_ok "URL watcher running (PID: $(cat "$PROJECT_DIR/url-watcher.pid"))"
-  fi
-
-  log_info "Waiting for ngrok to establish tunnel (10s)..."
-  sleep 10
-}
-
-display_final_info() {
-  log_sep
-
-  LIVE_URL=$(get_ngrok_url 2>/dev/null || cat "$URL_FILE" 2>/dev/null || echo "")
-  [[ -n "$LIVE_URL" ]] && echo "$LIVE_URL" > "$URL_FILE"
-
-  echo ""
-  echo -e "${GREEN}${BOLD}╔══════════════════════════════════════════════════════════════╗${RESET}"
-  echo -e "${GREEN}${BOLD}║              HERMES AGENT — DEPLOYMENT COMPLETE               ║${RESET}"
-  echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════════════════════╝${RESET}"
-  echo ""
-  echo -e "${BOLD}  ┌─  OPEN WEBUI ACCESS  ──────────────────────────────────────┐${RESET}"
-  if [[ -n "$LIVE_URL" ]]; then
-    echo -e "  │  🌐  URL:       ${CYAN}${BOLD}${LIVE_URL}${RESET}"
-  else
-    echo -e "  │  🌐  URL:       ${YELLOW}run  bash ${SCRIPTS_DIR}/get-url.sh${RESET}"
-  fi
-  echo -e "  │  👤  Open WebUI email: ${BOLD}${OPEN_WEBUI_ADMIN_EMAIL}${RESET}"
-  echo -e "  │  🔑  Open WebUI pass:  ${BOLD}${YELLOW}${OPEN_WEBUI_ADMIN_PASSWORD}${RESET}"
-  echo -e "  │"
-  echo -e "  │  Credentials saved to: ${CYAN}${CREDS_FILE}${RESET}"
-  echo -e "  └────────────────────────────────────────────────────────────"
-  echo ""
-  echo -e "${BOLD}  ┌─  LLM API KEYS (configure after portal access)  ──────────┐${RESET}"
-  echo -e "  │  OpenRouter:  https://openrouter.ai/keys"
-  echo -e "  │  Gemini:      https://aistudio.google.com/app/apikey"
-  echo -e "  │  After getting keys, uncomment in: ${CYAN}${ENV_FILE}${RESET}"
-  echo -e "  │  Then restart:  ${CYAN}bash ${SCRIPTS_DIR}/restart.sh${RESET}"
-  echo -e "  └────────────────────────────────────────────────────────────"
-  echo ""
-  echo -e "${BOLD}  ┌─  QUICK COMMANDS  ──────────────────────────────────────────┐${RESET}"
-  echo -e "  │  Get URL now:    ${CYAN}bash ${SCRIPTS_DIR}/get-url.sh${RESET}"
-  echo -e "  │  Full status:    ${CYAN}bash ${SCRIPTS_DIR}/status.sh${RESET}"
-  echo -e "  │  Stop all:       ${CYAN}bash ${SCRIPTS_DIR}/stop.sh${RESET}"
-  echo -e "  │  Restart all:    ${CYAN}bash ${SCRIPTS_DIR}/restart.sh${RESET}"
-  echo -e "  └────────────────────────────────────────────────────────────"
-  echo ""
-  echo -e "${BOLD}  ┌─  DOCKER LOGS  ──────────────��──────────────────────────────┐${RESET}"
-  echo -e "  │  Hermes:     ${CYAN}docker logs -f hermes-agent${RESET}"
-  echo -e "  │  Open WebUI: ${CYAN}docker logs -f hermes-open-webui${RESET}"
-  echo -e "  │  ngrok:      ${CYAN}docker logs -f hermes-ngrok${RESET}"
-  echo -e "  │  Both:      ${CYAN}cd ${PROJECT_DIR} && docker compose logs -f${RESET}"
-  echo -e "  └────────────────────────────────────────────────────────────"
-  echo ""
-  echo -e "${BOLD}  ┌─  NEXT STEPS  ──────────────────────────────────────────────┐${RESET}"
-  echo -e "  │  1. Open the URL above in your browser"
-  echo -e "  │  2. Sign in to Open WebUI with the admin email/password"
-  echo -e "  │  3. Select the hermes-agent model and chat"
-  echo -e "  └────────────────────────────────────────────────────────────"
-  echo ""
-  log_sep
-  echo -e "  ${DIM}URL watcher tracks ngrok URL changes automatically${RESET}"
-  echo -e "  ${DIM}Free plan = random URL on ngrok restart — watcher handles it${RESET}"
-  echo ""
+restart() {
+  [[ -f "$COMPOSE_FILE" && -f "$ENV_FILE" ]] || die "No deployment found at $PROJECT_DIR"
+  compose up -d --build --force-recreate
+  status
 }
 
 uninstall() {
-  echo ""
-  echo -e "${RED}${BOLD}⚠  UNINSTALL${RESET}"
-  echo -e "  Stops and removes containers + project files."
-  echo -e "  ${GREEN}Your data in ~/.hermes is PRESERVED.${RESET}"
-  echo ""
-  read -rp "  Type 'yes' to confirm: " CONFIRM
-  [[ "$CONFIRM" != "yes" ]] && { echo "Aborted."; exit 0; }
-
-  sudo systemctl stop "${WATCHER_SERVICE}"  2>/dev/null || true
-  sudo systemctl disable "${WATCHER_SERVICE}" 2>/dev/null || true
-  sudo rm -f "/etc/systemd/system/${WATCHER_SERVICE}.service"
-  sudo systemctl daemon-reload
-
-  [[ -f "$COMPOSE_FILE" ]] && { cd "$PROJECT_DIR"; docker compose down --remove-orphans 2>/dev/null || true; }
-
-  echo ""
-  log_warn "Project dir preserved: $PROJECT_DIR"
-  log_warn "Hermes data preserved: $HERMES_DATA_DIR"
-  log_ok   "Uninstall complete"
-  exit 0
+  [[ -f "$COMPOSE_FILE" && -f "$ENV_FILE" ]] || die "No deployment found at $PROJECT_DIR"
+  read -r -p "Remove deployment containers but preserve persistent data? [y/N] " answer
+  [[ "$answer" =~ ^[Yy]$ ]] || exit 0
+  compose down
+  ok "Containers removed. Persistent data and $PROJECT_DIR were preserved."
 }
 
-main() {
-  case "${1:-deploy}" in
-    --uninstall|-u)   banner; uninstall ;;
-    --status|-s)      bash "$SCRIPTS_DIR/status.sh" 2>/dev/null || echo "Not deployed yet."; exit 0 ;;
-    --url)            bash "$SCRIPTS_DIR/get-url.sh" 2>/dev/null || echo "Not deployed yet."; exit 0 ;;
-    --creds)          [[ -f "$CREDS_FILE" ]] && cat "$CREDS_FILE" || echo "Not deployed yet."; exit 0 ;;
-    --help|-h)
-      echo "Usage: $0 [OPTION]"
-      echo "  (no args)    Full deployment"
-      echo "  --status     Container status + URL"
-      echo "  --url        Print current ngrok URL"
-      echo "  --creds      Print Open WebUI credentials"
-      echo "  --uninstall  Stop containers + remove project"
-      echo "  --help       This message"
-      exit 0 ;;
-    deploy|"") ;;
-    *) log_error "Unknown: ${1}"; echo "Run with --help"; exit 1 ;;
-  esac
+case "${1:-}" in
+  --status) status; exit 0 ;;
+  --url) current_url; exit 0 ;;
+  --restart) restart; exit 0 ;;
+  --uninstall) uninstall; exit 0 ;;
+  --help|-h)
+    printf 'Usage: %s [--status|--url|--restart|--uninstall]\n' "$0"
+    exit 0
+    ;;
+  "") ;;
+  *) die "Unknown option: $1" ;;
+esac
 
-  banner
-  check_prerequisites
-  install_docker
-  collect_config
-  create_directories
-  generate_configs
-  generate_scripts
-  generate_watcher
-  setup_watcher_service
-  pull_images
-  start_services
-  display_final_info
-}
+command -v docker >/dev/null || die "Docker is required"
+docker compose version >/dev/null || die "Docker Compose v2 is required"
+command -v curl >/dev/null || die "curl is required"
+command -v python3 >/dev/null || die "python3 is required"
+command -v openssl >/dev/null || die "openssl is required"
+docker info >/dev/null 2>&1 || die "Docker daemon is not available to this user"
 
-main "$@"
+mkdir -p "$PROJECT_DIR" "$HOME/.hermes" "$HOME/hermes_workspace" "$PROJECT_DIR/logs" "$HOME/hermes-backups"
+install -m 0644 "$SOURCE_DIR/docker-compose.yml" "$COMPOSE_FILE"
+install -m 0644 "$SOURCE_DIR/Dockerfile.open-webui" "$PROJECT_DIR/Dockerfile.open-webui"
+
+if [[ ! -f "$ENV_FILE" ]]; then
+  read -r -s -p "ngrok auth token: " NGROK_AUTHTOKEN
+  printf '\n'
+  [[ -n "$NGROK_AUTHTOKEN" ]] || die "ngrok auth token is required"
+  read -r -p "Open WebUI admin email [admin@hermes.local]: " OPEN_WEBUI_ADMIN_EMAIL
+  OPEN_WEBUI_ADMIN_EMAIL="${OPEN_WEBUI_ADMIN_EMAIL:-admin@hermes.local}"
+  OPEN_WEBUI_ADMIN_PASSWORD="$(random_secret 16)"
+  API_SERVER_KEY="$(random_secret 24)"
+  WEBUI_SECRET_KEY="$(random_secret 32)"
+  umask 077
+  cat > "$ENV_FILE" <<EOF
+NGROK_AUTHTOKEN=$NGROK_AUTHTOKEN
+API_SERVER_KEY=$API_SERVER_KEY
+HERMES_DASHBOARD_PORT=9119
+HERMES_API_PORT=8642
+OPEN_WEBUI_PORT=3000
+OPEN_WEBUI_NAME=Hermes Open WebUI
+OPEN_WEBUI_ADMIN_EMAIL=$OPEN_WEBUI_ADMIN_EMAIL
+OPEN_WEBUI_ADMIN_PASSWORD=$OPEN_WEBUI_ADMIN_PASSWORD
+OPEN_WEBUI_SECRET_KEY=$WEBUI_SECRET_KEY
+OPEN_WEBUI_PUBLIC_URL=
+DOCKER_NETWORK=hermes_net
+LOG_LEVEL=INFO
+HERMES_DATA_DIR=$HOME/.hermes
+HERMES_LOG_DIR=$PROJECT_DIR/logs
+HERMES_WORKSPACE_DIR=$HOME/hermes_workspace
+TELEGRAM_REQUIRE_MENTION=true
+EOF
+  chmod 600 "$ENV_FILE"
+else
+  info "Preserving existing $ENV_FILE"
+fi
+
+[[ -n "$(env_value NGROK_AUTHTOKEN)" ]] || die "NGROK_AUTHTOKEN is missing in $ENV_FILE"
+[[ -n "$(env_value API_SERVER_KEY)" ]] || die "API_SERVER_KEY is missing in $ENV_FILE"
+[[ -n "$(env_value OPEN_WEBUI_ADMIN_PASSWORD)" ]] || die "OPEN_WEBUI_ADMIN_PASSWORD is missing in $ENV_FILE"
+[[ -n "$(env_value OPEN_WEBUI_SECRET_KEY)" ]] || die "OPEN_WEBUI_SECRET_KEY is missing in $ENV_FILE"
+
+info "Building and starting Hermes, Open WebUI, and ngrok"
+compose up -d --build
+
+for _ in $(seq 1 60); do
+  health="$(docker inspect hermes-open-webui --format '{{.State.Health.Status}}' 2>/dev/null || true)"
+  [[ "$health" == "healthy" ]] && break
+  sleep 2
+done
+[[ "${health:-}" == "healthy" ]] || die "Open WebUI did not become healthy; inspect docker logs hermes-open-webui"
+
+url=""
+for _ in $(seq 1 30); do
+  url="$(current_url)"
+  [[ -n "$url" ]] && break
+  sleep 2
+done
+[[ -n "$url" ]] || die "ngrok did not publish an HTTPS endpoint"
+
+umask 077
+cat > "$CREDS_FILE" <<EOF
+URL=$url
+EMAIL=$(env_value OPEN_WEBUI_ADMIN_EMAIL)
+PASSWORD=$(env_value OPEN_WEBUI_ADMIN_PASSWORD)
+EOF
+chmod 600 "$CREDS_FILE"
+
+ok "Open WebUI is healthy"
+printf 'URL: %s\n' "$url"
+printf 'Credentials: %s\n' "$CREDS_FILE"
+printf 'Next: configure valid provider keys, then deploy the tool/model/prompt catalogs.\n'
