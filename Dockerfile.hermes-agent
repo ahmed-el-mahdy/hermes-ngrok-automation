@@ -7,3 +7,7 @@ RUN uv pip install \
     "sounddevice==0.5.5" \
     "numpy==2.4.3" \
     "edge-tts==7.2.7"
+
+COPY patch-hermes-stt.py /tmp/patch-hermes-stt.py
+RUN /opt/hermes/.venv/bin/python /tmp/patch-hermes-stt.py \
+    && rm /tmp/patch-hermes-stt.py

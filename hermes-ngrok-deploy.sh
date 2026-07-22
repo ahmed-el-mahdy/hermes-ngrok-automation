@@ -74,6 +74,7 @@ docker info >/dev/null 2>&1 || die "Docker daemon is not available to this user"
 mkdir -p "$PROJECT_DIR" "$HOME/.hermes" "$HOME/hermes_workspace" "$PROJECT_DIR/logs" "$HOME/hermes-backups"
 install -m 0644 "$SOURCE_DIR/docker-compose.yml" "$COMPOSE_FILE"
 install -m 0644 "$SOURCE_DIR/Dockerfile.hermes-agent" "$PROJECT_DIR/Dockerfile.hermes-agent"
+install -m 0644 "$SOURCE_DIR/patch-hermes-stt.py" "$PROJECT_DIR/patch-hermes-stt.py"
 install -m 0644 "$SOURCE_DIR/Dockerfile.open-webui" "$PROJECT_DIR/Dockerfile.open-webui"
 
 if [[ ! -f "$ENV_FILE" ]]; then

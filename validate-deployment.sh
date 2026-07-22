@@ -24,6 +24,8 @@ done
 
 docker exec hermes-agent /opt/hermes/.venv/bin/python -c \
   'import faster_whisper, edge_tts' >/dev/null
+docker exec hermes-agent grep -q 'HERMES_STT_INITIAL_PROMPT' \
+  /opt/hermes/tools/transcription_tools.py
 
 public_url=""
 for _ in $(seq 1 45); do

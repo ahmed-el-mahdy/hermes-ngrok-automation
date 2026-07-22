@@ -82,9 +82,9 @@ Never set `GATEWAY_ALLOW_ALL_USERS=true` or `TELEGRAM_ALLOW_ALL_USERS=true` on a
 
 ### Telegram Media
 
-Run `bash configure-telegram-media.sh` to enable the persistent media profile. It builds `Dockerfile.hermes-agent` with Hermes' pinned `faster-whisper` dependencies, configures local Arabic STT, selects an Egyptian Arabic Edge TTS voice, keeps automatic TTS disabled, and adds an instruction to send audio only when requested.
+Run `bash configure-telegram-media.sh` to enable the persistent media profile. It builds `Dockerfile.hermes-agent` with Hermes' pinned `faster-whisper` dependencies and a guarded STT tuning patch, configures forced-Arabic transcription with Egyptian context and silence filtering, selects an Egyptian Arabic Edge TTS voice, keeps automatic TTS disabled, and adds instructions for Egyptian Arabic conversation and on-demand audio replies.
 
-The default `small` Whisper model is the recommended accuracy/latency compromise for Arabic on this CPU-only VM. `medium` is more accurate but substantially slower and larger. The Hugging Face model cache is persisted under `/opt/data/cache/huggingface`.
+The default `large-v3-turbo` model was selected from a real Egyptian Telegram sample: it preserved the Egyptian wording while transcribing in 16.4 seconds, compared with 21.8 seconds for `medium`; `small` was faster but misheard important words. Setup prefetches the selected model into `/opt/data/cache/huggingface`. Set `STT_MODEL=small` only when lower latency matters more than transcription accuracy.
 
 Validation should cover all three paths:
 

@@ -152,12 +152,12 @@ Enable the low-cost media profile after Telegram activation:
 bash configure-telegram-media.sh
 ```
 
-This profile uses local `faster-whisper small` with Arabic decoding for incoming voice messages and free Edge TTS with `ar-EG-ShakirNeural` for outgoing Arabic speech. The Whisper model cache lives under persistent Hermes data, so container recreation does not download it again. Ordinary replies stay text-only; Hermes generates an OGG/Opus Telegram voice note when the user explicitly asks for a voice reply. Telegram photos, image documents, and static stickers are cached and passed to the configured vision-capable Gemini model.
+This profile uses local `faster-whisper large-v3-turbo` with forced Arabic decoding, Egyptian Arabic context, beam search, and silence filtering for incoming voice messages. Free Edge TTS with `ar-EG-ShakirNeural` handles outgoing Arabic speech. The Whisper model is downloaded during setup and cached under persistent Hermes data, so container recreation does not download it again. Ordinary replies stay text-only; Hermes generates an OGG/Opus Telegram voice note when the user explicitly asks for a voice reply. Telegram photos, image documents, and static stickers are cached and passed to the configured vision-capable Gemini model. Hermes answers this user in clear Egyptian Arabic by default.
 
 Override the defaults when needed:
 
 ```bash
-STT_MODEL=medium STT_LANGUAGE=ar TTS_VOICE=ar-EG-SalmaNeural \
+STT_MODEL=small STT_LANGUAGE=ar TTS_VOICE=ar-EG-SalmaNeural \
   bash configure-telegram-media.sh
 ```
 

@@ -3,12 +3,12 @@ set -euo pipefail
 
 PROJECT_DIR="${HERMES_PROJECT_DIR:-$HOME/hermes-ngrok}"
 BACKUP_ROOT="${HERMES_BACKUP_DIR:-$HOME/hermes-backups}"
-STT_MODEL="${STT_MODEL:-small}"
+STT_MODEL="${STT_MODEL:-large-v3-turbo}"
 STT_LANGUAGE="${STT_LANGUAGE:-ar}"
 TTS_VOICE="${TTS_VOICE:-ar-EG-ShakirNeural}"
 
 case "$STT_MODEL" in
-  tiny|base|small|medium|large-v3) ;;
+  tiny|base|small|medium|large-v3|large-v3-turbo|turbo) ;;
   *) echo "ERROR: unsupported STT_MODEL=$STT_MODEL" >&2; exit 1 ;;
 esac
 
@@ -46,7 +46,7 @@ voice['max_recording_seconds'] = 120
 
 marker = '[TELEGRAM_MEDIA_POLICY]'
 policy = '''[TELEGRAM_MEDIA_POLICY]
-For Telegram media: analyze attached images directly and explain what is visible, while stating uncertainty when needed. Incoming voice messages are transcribed automatically; answer their meaning rather than discussing the audio file path. When the user explicitly asks for a voice or audio reply in Arabic or English, call the text_to_speech tool so Telegram receives a playable voice message. Do not generate voice for ordinary text replies unless explicitly requested.'''
+Speak to this user in natural, clear Egyptian Arabic by default, using familiar Egyptian wording without exaggerating slang. Switch languages when the user asks. For Telegram media: analyze attached images directly and explain what is visible, while stating uncertainty when needed. Incoming voice messages are transcribed automatically; answer their meaning rather than discussing the audio file path. When the user explicitly asks for a voice or audio reply in Arabic or English, call the text_to_speech tool so Telegram receives a playable voice message. Do not generate voice for ordinary text replies unless explicitly requested.'''
 agent = config.setdefault('agent', {})
 existing = str(agent.get('system_prompt') or '').strip()
 if marker in existing:
@@ -60,9 +60,22 @@ docker exec -u root hermes-agent sh -lc \
   'chown 10000:10000 /opt/data/config.yaml && chmod 600 /opt/data/config.yaml'
 docker compose --env-file .env -f docker-compose.yml up -d --build --force-recreate hermes-agent
 
+docker exec \
+  -e STT_MODEL="$STT_MODEL" \
+  -i hermes-agent /opt/hermes/.venv/bin/python - <<'PY'
+import os
+from faster_whisper import WhisperModel
+
+model_name = os.environ['STT_MODEL']
+WhisperModel(model_name, device='cpu', compute_type='int8')
+print(f'stt_model_cached={model_name}')
+PY
+
 for _ in $(seq 1 60); do
   if docker exec hermes-agent /opt/hermes/.venv/bin/python -c \
     'import faster_whisper, edge_tts' >/dev/null 2>&1 \
+    && docker exec hermes-agent grep -q 'HERMES_STT_INITIAL_PROMPT' \
+      /opt/hermes/tools/transcription_tools.py \
     && docker logs --since 2m hermes-agent 2>&1 | grep -q 'Hermes Gateway Starting'; then
     echo 'telegram_media=ready'
     echo "stt=local/$STT_MODEL"
