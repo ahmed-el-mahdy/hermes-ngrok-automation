@@ -11,8 +11,8 @@ flowchart LR
   U[User browser] --> N[ngrok HTTPS]
   N --> W[Open WebUI]
   W --> H[Hermes API gateway]
-  H --> G[Gemini primary]
-  H --> R[NaraRouter fallbacks]
+  H --> G[Gemini primary and fallback]
+  H -. manual .-> R[NaraRouter presets]
   H --> O[Windows Ollama GPU fallback]
   W --> D[(Open WebUI volume)]
   H --> C[(Hermes data)]
@@ -55,7 +55,7 @@ flowchart LR
 
 ## Current Limitations
 
-- Free cloud routes can be rate-limited or require credit without notice.
+- Free cloud routes can be rate-limited or require credit without notice; slow optional providers are excluded from automatic fallback.
 - The ngrok free endpoint can change unless the account provides a reserved domain.
 - Telegram activation requires external bot credentials and an authorized numeric user ID.
 - The local 4B model is a reliability fallback, not the preferred quality route.

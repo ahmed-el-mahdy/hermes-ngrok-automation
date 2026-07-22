@@ -2,7 +2,7 @@
 set -euo pipefail
 
 : "${GOOGLE_API_KEY:?GOOGLE_API_KEY is required}"
-: "${NARA_ROUTER_API_KEY:?NARA_ROUTER_API_KEY is required}"
+NARA_ROUTER_API_KEY="${NARA_ROUTER_API_KEY:-}"
 
 PROJECT_DIR="${HERMES_PROJECT_DIR:-$HOME/hermes-ngrok}"
 HERMES_DATA_DIR="${HERMES_DATA_DIR:-$HOME/.hermes}"
@@ -26,8 +26,9 @@ path = Path(os.environ['PROJECT_ENV'])
 updates = {
     'GOOGLE_API_KEY': os.environ['GOOGLE_API_KEY'],
     'GEMINI_API_KEY': os.environ['GOOGLE_API_KEY'],
-    'NARA_ROUTER_API_KEY': os.environ['NARA_ROUTER_API_KEY'],
 }
+if os.environ.get('NARA_ROUTER_API_KEY'):
+    updates['NARA_ROUTER_API_KEY'] = os.environ['NARA_ROUTER_API_KEY']
 lines = path.read_text().splitlines()
 seen = set()
 out = []
@@ -60,8 +61,9 @@ env_path = Path("/opt/data/.env")
 updates = {
     "GOOGLE_API_KEY": os.environ["GOOGLE_API_KEY"],
     "GEMINI_API_KEY": os.environ["GOOGLE_API_KEY"],
-    "NARA_ROUTER_API_KEY": os.environ["NARA_ROUTER_API_KEY"],
 }
+if os.environ.get("NARA_ROUTER_API_KEY"):
+    updates["NARA_ROUTER_API_KEY"] = os.environ["NARA_ROUTER_API_KEY"]
 lines = env_path.read_text().splitlines()
 seen = set()
 out = []
@@ -80,12 +82,12 @@ env_path.write_text("\n".join(out) + "\n")
 config_path = Path("/opt/data/config.yaml")
 config = yaml.safe_load(config_path.read_text()) or {}
 config["model"] = {
-    "default": "gemini-3.5-flash",
+    "default": "gemini-3.1-flash-lite",
     "provider": "gemini",
     "base_url": "https://generativelanguage.googleapis.com/v1beta",
 }
-config["providers"] = {
-    "nararouter": {
+if os.environ.get("NARA_ROUTER_API_KEY"):
+    config.setdefault("providers", {})["nararouter"] = {
         "name": "NaraRouter",
         "base_url": "https://router.bynara.id/v1",
         "key_env": "NARA_ROUTER_API_KEY",
@@ -96,19 +98,11 @@ config["providers"] = {
         },
         "discover_models": True,
     }
-}
 config["fallback_providers"] = [
     {
-        "provider": "nararouter",
-        "model": "glm-5.2-free",
-        "base_url": "https://router.bynara.id/v1",
-        "api_mode": "chat_completions",
-    },
-    {
-        "provider": "nararouter",
-        "model": "mistral-large",
-        "base_url": "https://router.bynara.id/v1",
-        "api_mode": "chat_completions",
+        "provider": "gemini",
+        "model": "gemini-2.5-flash",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta",
     },
     {
         "provider": "ollama",
@@ -118,7 +112,7 @@ config["fallback_providers"] = [
     },
 ]
 config.setdefault("agent", {})["api_max_retries"] = 1
-config["agent"]["tool_use_enforcement"] = ["gemini", "glm", "mistral"]
+config["agent"]["tool_use_enforcement"] = ["gemini"]
 for task, settings in (config.get("auxiliary") or {}).items():
     if isinstance(settings, dict):
         settings["provider"] = "gemini"
@@ -158,5 +152,5 @@ fi
 
 echo "backup_dir=$backup_dir"
 echo 'gateway=healthy'
-echo 'primary=gemini-3.5-flash'
-echo 'fallbacks=glm-5.2-free,mistral-large,qwen3-4b-gpu:latest'
+echo 'primary=gemini-3.1-flash-lite'
+echo 'fallbacks=gemini-2.5-flash,qwen3-4b-gpu:latest'

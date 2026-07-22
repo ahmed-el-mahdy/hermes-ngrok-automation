@@ -2,6 +2,8 @@
 
 Deploy Hermes Agent behind Open WebUI and publish only the Open WebUI login through ngrok. The Hermes dashboard and API remain bound to the VM loopback interface.
 
+The custom dashboard image is pinned to Open WebUI `v0.10.2` and adds Node.js for the canonical Code Executor tool.
+
 ## Architecture
 
 ```text
@@ -69,12 +71,11 @@ Container recreation does not remove these locations. Do not use `docker compose
 
 The validated routing policy is:
 
-1. `gemini-3.5-flash`
-2. `glm-5.2-free` through NaraRouter
-3. `mistral-large` through NaraRouter
-4. `qwen3-4b-gpu:latest` through a trusted LAN Ollama endpoint
+1. `gemini-3.1-flash-lite`
+2. `gemini-2.5-flash`
+3. `qwen3-4b-gpu:latest` through a trusted LAN Ollama endpoint
 
-Auxiliary tasks use `gemini-3.1-flash-lite`. Provider credentials are runtime secrets and must never be committed.
+NaraRouter presets remain available for manual use but are excluded from automatic fallback so a provider outage cannot stall normal chats. Provider credentials are runtime secrets and must never be committed.
 
 Apply the routing policy without putting keys on disk in the repository:
 

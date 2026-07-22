@@ -31,6 +31,7 @@ done
 [[ -n "$public_url" ]] || exit 1
 
 PORTAL_EMAIL="$PORTAL_EMAIL" PORTAL_PASSWORD="$PORTAL_PASSWORD" PUBLIC_URL="$public_url" \
+  EXPECTED_OPEN_WEBUI_VERSION="${EXPECTED_OPEN_WEBUI_VERSION:-}" \
   python3 "$SCRIPT_DIR/validate-deployment.py"
 
 docker compose ps

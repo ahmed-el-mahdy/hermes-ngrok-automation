@@ -43,6 +43,10 @@ token = (signin or {}).get("token")
 if not token:
     raise SystemExit("Portal authentication failed after recreation")
 
+version_status, version_body = request(LOCAL, "/api/version", timeout=30)
+running_version = str((version_body or {}).get("version") or "")
+expected_version = os.environ.get("EXPECTED_OPEN_WEBUI_VERSION", "").removeprefix("v")
+
 models_status, models_body = request(LOCAL, "/api/v1/models/list", token=token)
 models = (models_body or {}).get("items") or []
 model_ids = {item.get("id") for item in models}
@@ -102,6 +106,8 @@ evidence_paths = [
 ]
 checks = {
     "local_signin": True,
+    "open_webui_version": version_status == 200
+    and (not expected_version or running_version == expected_version),
     "models": models_status == 200 and required_models <= model_ids,
     "tools": tools_status == 200 and tool_ids == required_tools,
     "prompts": prompts_status == 200 and required_prompts <= prompt_commands,
@@ -115,6 +121,7 @@ report = {
     "public_url": public_url,
     "checks": checks,
     "counts": {"models": len(model_ids), "tools": len(tool_ids), "prompts": len(required_prompts & prompt_commands)},
+    "open_webui_version": running_version,
     "chat_excerpt": " ".join(chat_content.split())[:120],
     "missing_models": sorted(required_models - model_ids),
     "missing_tools": sorted(required_tools - tool_ids),

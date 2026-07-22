@@ -1,5 +1,7 @@
 # Deployment Guide
 
+The repository currently pins Open WebUI `v0.10.2`. Review the official release notes and run the recreation validation before changing this version.
+
 ## Initial Setup
 
 1. Clone the repository on the Ubuntu VM.
@@ -29,7 +31,7 @@ Each deployment wrapper creates a timestamped database backup under `~/hermes-ba
 
 ## Model Routing
 
-Model routing is stored in `~/.hermes/config.yaml` and secrets in `~/.hermes/.env`. The recommended order is Gemini primary, two verified NaraRouter fallbacks, then the LAN-restricted Ollama GPU endpoint.
+Model routing is stored in `~/.hermes/config.yaml` and secrets in `~/.hermes/.env`. The recommended automatic order is Gemini 3.1 Flash Lite, Gemini 2.5 Flash, then the LAN-restricted Ollama GPU endpoint. NaraRouter presets are manual-only because an unavailable cloud route can otherwise delay fallback.
 
 Validate each provider independently before adding it to the fallback chain. Interpret common responses as follows:
 

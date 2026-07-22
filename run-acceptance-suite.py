@@ -393,7 +393,7 @@ specialist_prompts = {
     "coder": "Create a concise implementation note for a FastAPI API where missing item IDs now return HTTP 404 and three regression tests pass.",
     "reviewer": "Create a concise review closure note: the original missing-item endpoint returned 200/null; it was fixed to 404 with a regression test; all three tests pass. Lead with the resolved finding and mention residual in-memory storage limitation.",
     "designer": "Create a concise design rationale for a responsive operations dashboard with portal/model/tool status, activity table, semantic markup, visible focus, and mobile stacking.",
-    "consultant": "Create a concise routing recommendation: Gemini 3.5 Flash primary, GLM 5.2 Free then Mistral Large cloud fallback, local Qwen 3 4B GPU final fallback. Mention cloud quota risk and local quality tradeoff.",
+    "consultant": "Create a concise routing recommendation: Gemini 3.1 Flash Lite primary, Gemini 2.5 Flash fallback, and local Qwen 3 4B GPU final fallback. Mention cloud quota risk, manual-only Nara presets, and the local quality tradeoff.",
     "coordinator": "Create a concise task-board summary: infrastructure, tools, 13 models, 10 prompts, and four workflows are done; Telegram activation is blocked pending bot token and authorized user ID; final restart verification remains.",
 }
 def generate_specialist(item):
@@ -500,12 +500,11 @@ write(
     OUT / "hermes_model_routing.md",
     """# HERMES Model Routing
 
-1. Primary: `gemini-3.5-flash`
-2. Cloud fallback: `glm-5.2-free`
-3. Cloud fallback: `mistral-large`
-4. Local final fallback: `qwen3-4b-gpu:latest` at the Windows Ollama service
+1. Primary: `gemini-3.1-flash-lite`
+2. Cloud fallback: `gemini-2.5-flash`
+3. Local final fallback: `qwen3-4b-gpu:latest` at the Windows Ollama service
 
-Auxiliary tasks use `gemini-3.1-flash-lite`. NaraRouter routes that returned payment, rate-limit, or not-found errors were not published. Keys are stored only in runtime configuration and are intentionally absent from this report.
+NaraRouter presets remain manual-only because provider timeouts would otherwise delay ordinary chats. Keys are stored only in runtime configuration and are intentionally absent from this report.
 """,
 )
 write(
