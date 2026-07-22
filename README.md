@@ -2,7 +2,7 @@
 
 Deploy Hermes Agent behind Open WebUI and publish only the Open WebUI login through ngrok. The Hermes dashboard and API remain bound to the VM loopback interface.
 
-The custom dashboard image is pinned to Open WebUI `v0.10.2` and adds Node.js for the canonical Code Executor tool.
+The custom dashboard image is pinned to Open WebUI `v0.10.2` and adds Node.js for the canonical Code Executor tool. The custom Hermes image adds the supported local `faster-whisper` voice runtime.
 
 ## Architecture
 
@@ -143,6 +143,23 @@ TELEGRAM_REQUIRE_MENTION=true
 ```
 
 Compose forces `TELEGRAM_ALLOW_ALL_USERS=false` and `GATEWAY_ALLOW_ALL_USERS=false`. Restart `hermes-agent` after adding the token and allowlist.
+
+### Telegram Images And Voice
+
+Enable the low-cost media profile after Telegram activation:
+
+```bash
+bash configure-telegram-media.sh
+```
+
+This profile uses local `faster-whisper small` with Arabic decoding for incoming voice messages and free Edge TTS with `ar-EG-ShakirNeural` for outgoing Arabic speech. The Whisper model cache lives under persistent Hermes data, so container recreation does not download it again. Ordinary replies stay text-only; Hermes generates an OGG/Opus Telegram voice note when the user explicitly asks for a voice reply. Telegram photos, image documents, and static stickers are cached and passed to the configured vision-capable Gemini model.
+
+Override the defaults when needed:
+
+```bash
+STT_MODEL=medium STT_LANGUAGE=ar TTS_VOICE=ar-EG-SalmaNeural \
+  bash configure-telegram-media.sh
+```
 
 ## Validation
 

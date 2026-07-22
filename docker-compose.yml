@@ -1,6 +1,9 @@
 services:
   hermes-agent:
-    image: nousresearch/hermes-agent:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.hermes-agent
+    image: hermes-agent:local
     container_name: hermes-agent
     restart: unless-stopped
     command: gateway run
@@ -19,6 +22,8 @@ services:
       API_SERVER_KEY: "${API_SERVER_KEY}"
       API_SERVER_CORS_ORIGINS: "*"
       LOG_LEVEL: "${LOG_LEVEL:-INFO}"
+      HF_HOME: "/opt/data/cache/huggingface"
+      XDG_CACHE_HOME: "/opt/data/cache"
       TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
       TELEGRAM_ALLOWED_USERS: "${TELEGRAM_ALLOWED_USERS:-}"
       TELEGRAM_GROUP_ALLOWED_USERS: "${TELEGRAM_GROUP_ALLOWED_USERS:-}"

@@ -80,6 +80,20 @@ docker logs --tail 100 hermes-agent
 
 Never set `GATEWAY_ALLOW_ALL_USERS=true` or `TELEGRAM_ALLOW_ALL_USERS=true` on an internet-connected deployment.
 
+### Telegram Media
+
+Run `bash configure-telegram-media.sh` to enable the persistent media profile. It builds `Dockerfile.hermes-agent` with Hermes' pinned `faster-whisper` dependencies, configures local Arabic STT, selects an Egyptian Arabic Edge TTS voice, keeps automatic TTS disabled, and adds an instruction to send audio only when requested.
+
+The default `small` Whisper model is the recommended accuracy/latency compromise for Arabic on this CPU-only VM. `medium` is more accurate but substantially slower and larger. The Hugging Face model cache is persisted under `/opt/data/cache/huggingface`.
+
+Validation should cover all three paths:
+
+```text
+Telegram voice -> cached OGG -> local Whisper -> agent response
+Telegram photo -> cached image -> Gemini vision -> agent response
+Explicit voice request -> Edge TTS -> OGG/Opus -> Telegram voice note
+```
+
 ## Operations
 
 ```bash

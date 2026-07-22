@@ -1,0 +1,9 @@
+FROM nousresearch/hermes-agent:latest
+
+ENV VIRTUAL_ENV=/opt/hermes/.venv
+
+RUN uv pip install \
+    "faster-whisper==1.2.1" \
+    "sounddevice==0.5.5" \
+    "numpy==2.4.3" \
+    "edge-tts==7.2.7"

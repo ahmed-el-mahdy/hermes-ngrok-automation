@@ -22,6 +22,9 @@ done
 [[ "$webui_health" == "healthy" ]] || { docker compose ps; exit 1; }
 [[ "$agent_state" == "running" && "$ngrok_state" == "running" ]] || { docker compose ps; exit 1; }
 
+docker exec hermes-agent /opt/hermes/.venv/bin/python -c \
+  'import faster_whisper, edge_tts' >/dev/null
+
 public_url=""
 for _ in $(seq 1 45); do
   public_url="$(curl -fsS http://127.0.0.1:4040/api/tunnels 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(next((x['public_url'] for x in d.get('tunnels',[]) if x.get('proto')=='https'), ''))" 2>/dev/null || true)"
