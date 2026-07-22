@@ -264,7 +264,7 @@ write(
     """+--------------------------------------------------+
 | HERMES Operations                    [Refresh]   |
 +--------------------------------------------------+
-| Portal: Ready | Models: 13/13 | Tools: 7/7      |
+| Portal: Ready | Models: 11/11 | Tools: 7/7      |
 +--------------------------------------------------+
 | Time       | Component | Result                  |
 | 21:40      | Models    | All profiles passed     |
@@ -393,8 +393,8 @@ specialist_prompts = {
     "coder": "Create a concise implementation note for a FastAPI API where missing item IDs now return HTTP 404 and three regression tests pass.",
     "reviewer": "Create a concise review closure note: the original missing-item endpoint returned 200/null; it was fixed to 404 with a regression test; all three tests pass. Lead with the resolved finding and mention residual in-memory storage limitation.",
     "designer": "Create a concise design rationale for a responsive operations dashboard with portal/model/tool status, activity table, semantic markup, visible focus, and mobile stacking.",
-    "consultant": "Create a concise routing recommendation: Gemini 3.1 Flash Lite primary, Gemini 2.5 Flash fallback, and local Qwen 3 4B GPU final fallback. Mention cloud quota risk, manual-only Nara presets, and the local quality tradeoff.",
-    "coordinator": "Create a concise task-board summary: infrastructure, tools, 13 models, 10 prompts, and four workflows are done; Telegram activation is blocked pending bot token and authorized user ID; final restart verification remains.",
+    "consultant": "Create a concise routing recommendation: Gemini 3.1 Flash Lite primary, Gemini 2.5 Flash fallback, and local Qwen 3 4B GPU available directly through the native Ollama API. Mention cloud quota risk and the local quality tradeoff.",
+    "coordinator": "Create a concise task-board summary: infrastructure, tools, 11 models, 10 prompts, and four workflows are done; Telegram activation is blocked pending bot token and authorized user ID; final restart verification remains.",
 }
 def generate_specialist(item):
     model_id, prompt = item
@@ -488,7 +488,7 @@ write(
 Status: {'PASS WITH LIMITATIONS' if skills_passed == 30 and workflows_ok and specialists_ok else 'FAIL'}
 
 - Canonical tools: 7/7 passed
-- Published models: 13/13 passed smoke tests
+- Published models: 11/11 passed smoke tests
 - Specialist artifacts: {sum(item['passed'] for item in specialist_results)}/9 saved
 - Reusable prompt patterns: 10/10 installed
 - Skills: {skills_passed}/30 passed
@@ -502,9 +502,9 @@ write(
 
 1. Primary: `gemini-3.1-flash-lite`
 2. Cloud fallback: `gemini-2.5-flash`
-3. Local final fallback: `qwen3-4b-gpu:latest` at the Windows Ollama service
+3. Local direct model: `hermes-local-gpu`, backed by `qwen3-4b-gpu:latest` through Open WebUI's native Ollama API
 
-NaraRouter presets remain manual-only because provider timeouts would otherwise delay ordinary chats. Keys are stored only in runtime configuration and are intentionally absent from this report.
+The local model is selected directly in the portal instead of being sent through Hermes' OpenAI-compatible transport. Keys are stored only in runtime configuration and are intentionally absent from this report.
 """,
 )
 write(
@@ -519,9 +519,9 @@ Check `docker compose ps`, then inspect `hermes-ngrok` logs. The tunnel target m
 
 Check `hermes-agent` logs, call its authenticated `/v1/models`, then test the primary Gemini route and each fallback. A provider HTTP 401 means invalid credentials; 402 means credit is required; 429 means quota or rate limiting.
 
-## Local fallback is unavailable
+## Local model is unavailable
 
-Verify Windows Ollama is listening on `192.168.1.2:11434`, then call `/api/tags` from the VM. Keep the listener restricted to the trusted LAN/VM path.
+Verify Windows Ollama is listening on `192.168.1.2:11434`, then call `/api/tags`, `/api/chat`, and `/api/ps` from the VM. Confirm Open WebUI has its native Ollama connector enabled and keep the listener restricted to the trusted LAN/VM path.
 
 ## Dashboard login loops
 

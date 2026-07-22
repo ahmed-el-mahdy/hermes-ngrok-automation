@@ -10,10 +10,10 @@ The custom dashboard image is pinned to Open WebUI `v0.10.2` and adds Node.js fo
 Browser
   -> ngrok HTTPS endpoint
   -> Open WebUI :8080
-  -> Hermes OpenAI-compatible API :8642
-  -> Gemini primary
-     -> NaraRouter cloud fallbacks
-     -> Windows Ollama GPU fallback
+     -> Hermes OpenAI-compatible API :8642
+        -> Gemini primary and cloud fallback
+     -> Windows Ollama native API :11434
+        -> qwen3-4b-gpu:latest
 ```
 
 The deployment uses three containers on one private Docker bridge network:
@@ -69,19 +69,40 @@ Container recreation does not remove these locations. Do not use `docker compose
 
 ## Model Routing
 
-The validated routing policy is:
+The validated cloud routing policy inside Hermes is:
 
 1. `gemini-3.1-flash-lite`
 2. `gemini-2.5-flash`
-3. `qwen3-4b-gpu:latest` through a trusted LAN Ollama endpoint
 
-NaraRouter presets remain available for manual use but are excluded from automatic fallback so a provider outage cannot stall normal chats. Provider credentials are runtime secrets and must never be committed.
+The local model is published separately as `hermes-local-gpu`. Open WebUI calls `qwen3-4b-gpu:latest` through Ollama's native `/api/chat` endpoint, which preserves Ollama reasoning behavior and avoids the empty-content responses seen through the OpenAI compatibility endpoint. Provider credentials are runtime secrets and must never be committed.
+
+### Persistent Windows Ollama
+
+Install the Windows boot task from an elevated PowerShell session:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\windows\Install-HermesOllamaTask.ps1
+```
+
+The task runs Ollama as `SYSTEM` at startup, preloads `qwen3-4b-gpu:latest`, requires the model's full size to be resident in VRAM, keeps it loaded, restarts after failures, and creates an inbound firewall rule restricted to the Hermes VM address `192.168.1.5`.
+
+Run a controlled restart test from an elevated PowerShell session:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\windows\Test-HermesOllamaRecovery.ps1
+```
+
+After Ollama is reachable, configure the two supported portal connections and publish the model catalog:
+
+```bash
+OLLAMA_BASE_URL='http://192.168.1.2:11434' bash configure-openwebui-providers.sh
+PORTAL_EMAIL='admin@hermes.local' PORTAL_PASSWORD='...' bash deploy-model-catalog.sh
+```
 
 Apply the routing policy without putting keys on disk in the repository:
 
 ```bash
-GOOGLE_API_KEY='...' NARA_ROUTER_API_KEY='...' \
-OLLAMA_BASE_URL='http://trusted-host:11434' bash apply-model-routing.sh
+GOOGLE_API_KEY='...' bash apply-model-routing.sh
 ```
 
 Published Open WebUI profiles:
@@ -89,7 +110,7 @@ Published Open WebUI profiles:
 - `hermes`
 - `orchestrator`, `searcher`, `scraper`, `builder`, `coder`
 - `reviewer`, `designer`, `consultant`, `coordinator`
-- `nara-writer`, `nara-reasoner`, `nara-general`
+- `hermes-local-gpu` through the native Ollama API
 
 ## Canonical Tools
 
@@ -128,7 +149,7 @@ Compose forces `TELEGRAM_ALLOW_ALL_USERS=false` and `GATEWAY_ALLOW_ALL_USERS=fal
 The acceptance suite verifies:
 
 - all seven tools
-- all 13 model profiles
+- all 11 model profiles
 - all nine specialist artifacts
 - all ten prompt patterns
 - the 30-skill matrix

@@ -52,7 +52,7 @@ models = (models_body or {}).get("items") or []
 model_ids = {item.get("id") for item in models}
 required_models = {
     "hermes", "orchestrator", "searcher", "scraper", "builder", "coder", "reviewer",
-    "designer", "consultant", "coordinator", "nara-writer", "nara-reasoner", "nara-general",
+    "designer", "consultant", "coordinator", "hermes-local-gpu",
 }
 tools_status, tools_body = request(LOCAL, "/api/v1/tools/", token=token)
 tool_ids = {item.get("id") for item in (tools_body or [])}

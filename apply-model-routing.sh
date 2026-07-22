@@ -2,12 +2,9 @@
 set -euo pipefail
 
 : "${GOOGLE_API_KEY:?GOOGLE_API_KEY is required}"
-NARA_ROUTER_API_KEY="${NARA_ROUTER_API_KEY:-}"
-
 PROJECT_DIR="${HERMES_PROJECT_DIR:-$HOME/hermes-ngrok}"
 HERMES_DATA_DIR="${HERMES_DATA_DIR:-$HOME/.hermes}"
 BACKUP_ROOT="${HERMES_BACKUP_DIR:-$HOME/hermes-backups}"
-OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://192.168.1.2:11434}"
 
 stamp="$(date +%Y%m%d_%H%M%S)"
 backup_dir="${BACKUP_ROOT}/${stamp}-model-routing"
@@ -17,7 +14,7 @@ cp -a "$PROJECT_DIR/.env" "$backup_dir/compose.env.bak"
 docker cp hermes-agent:/opt/data/.env "$backup_dir/hermes.env.bak"
 docker cp hermes-agent:/opt/data/config.yaml "$backup_dir/config.yaml.bak"
 
-export GOOGLE_API_KEY NARA_ROUTER_API_KEY OLLAMA_BASE_URL
+export GOOGLE_API_KEY
 PROJECT_ENV="$PROJECT_DIR/.env" python3 - <<'PY'
 from pathlib import Path
 import os
@@ -27,13 +24,14 @@ updates = {
     'GOOGLE_API_KEY': os.environ['GOOGLE_API_KEY'],
     'GEMINI_API_KEY': os.environ['GOOGLE_API_KEY'],
 }
-if os.environ.get('NARA_ROUTER_API_KEY'):
-    updates['NARA_ROUTER_API_KEY'] = os.environ['NARA_ROUTER_API_KEY']
+remove = {'NARA_ROUTER_API_KEY'}
 lines = path.read_text().splitlines()
 seen = set()
 out = []
 for line in lines:
     key = line.split('=', 1)[0].strip() if '=' in line and not line.lstrip().startswith('#') else ''
+    if key in remove:
+        continue
     if key in updates:
         out.append(f'{key}={updates[key]}')
         seen.add(key)
@@ -47,8 +45,6 @@ PY
 
 docker exec -u root \
   -e GOOGLE_API_KEY \
-  -e NARA_ROUTER_API_KEY \
-  -e OLLAMA_BASE_URL \
   hermes-agent /bin/bash -lc '
     set -euo pipefail
     . /opt/hermes/.venv/bin/activate
@@ -62,13 +58,14 @@ updates = {
     "GOOGLE_API_KEY": os.environ["GOOGLE_API_KEY"],
     "GEMINI_API_KEY": os.environ["GOOGLE_API_KEY"],
 }
-if os.environ.get("NARA_ROUTER_API_KEY"):
-    updates["NARA_ROUTER_API_KEY"] = os.environ["NARA_ROUTER_API_KEY"]
+remove = {"NARA_ROUTER_API_KEY"}
 lines = env_path.read_text().splitlines()
 seen = set()
 out = []
 for line in lines:
     key = line.split("=", 1)[0].strip() if "=" in line and not line.lstrip().startswith("#") else ""
+    if key in remove:
+        continue
     if key in updates:
         out.append(f"{key}={updates[key]}")
         seen.add(key)
@@ -86,29 +83,12 @@ config["model"] = {
     "provider": "gemini",
     "base_url": "https://generativelanguage.googleapis.com/v1beta",
 }
-if os.environ.get("NARA_ROUTER_API_KEY"):
-    config.setdefault("providers", {})["nararouter"] = {
-        "name": "NaraRouter",
-        "base_url": "https://router.bynara.id/v1",
-        "key_env": "NARA_ROUTER_API_KEY",
-        "api_mode": "chat_completions",
-        "models": {
-            "glm-5.2-free": {"context_length": 131072},
-            "mistral-large": {"context_length": 131072},
-        },
-        "discover_models": True,
-    }
+config.setdefault("providers", {}).pop("nararouter", None)
 config["fallback_providers"] = [
     {
         "provider": "gemini",
         "model": "gemini-2.5-flash",
         "base_url": "https://generativelanguage.googleapis.com/v1beta",
-    },
-    {
-        "provider": "ollama",
-        "model": "qwen3-4b-gpu:latest",
-        "base_url": os.environ["OLLAMA_BASE_URL"],
-        "api_mode": "chat_completions",
     },
 ]
 config.setdefault("agent", {})["api_max_retries"] = 1
@@ -153,4 +133,5 @@ fi
 echo "backup_dir=$backup_dir"
 echo 'gateway=healthy'
 echo 'primary=gemini-3.1-flash-lite'
-echo 'fallbacks=gemini-2.5-flash,qwen3-4b-gpu:latest'
+echo 'fallbacks=gemini-2.5-flash'
+echo 'local_qwen=Open WebUI native Ollama API'

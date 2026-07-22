@@ -22,6 +22,7 @@ read -rsp 'Open WebUI password: ' PORTAL_PASSWORD
 export PORTAL_PASSWORD
 
 bash deploy-canonical-tools.sh
+bash configure-openwebui-providers.sh
 bash deploy-model-catalog.sh
 bash deploy-prompt-library.sh
 bash validate-model-catalog.sh
@@ -31,7 +32,7 @@ Each deployment wrapper creates a timestamped database backup under `~/hermes-ba
 
 ## Model Routing
 
-Model routing is stored in `~/.hermes/config.yaml` and secrets in `~/.hermes/.env`. The recommended automatic order is Gemini 3.1 Flash Lite, Gemini 2.5 Flash, then the LAN-restricted Ollama GPU endpoint. NaraRouter presets are manual-only because an unavailable cloud route can otherwise delay fallback.
+Cloud routing is stored in `~/.hermes/config.yaml` and secrets in `~/.hermes/.env`. The recommended automatic order is Gemini 3.1 Flash Lite and then Gemini 2.5 Flash. Local Qwen is a separate model in Open WebUI because Hermes' fallback transport uses OpenAI chat completions while this Qwen build responds correctly through Ollama's native API.
 
 Validate each provider independently before adding it to the fallback chain. Interpret common responses as follows:
 
@@ -45,7 +46,7 @@ Validate each provider independently before adding it to the fallback chain. Int
 
 Do not publish a preset for a route that does not return a successful chat completion.
 
-## Local Ollama Fallback
+## Local Ollama Model
 
 The Windows Ollama listener must be reachable only from the trusted LAN/VM network. From the VM:
 
@@ -53,7 +54,11 @@ The Windows Ollama listener must be reachable only from the trusted LAN/VM netwo
 curl -fsS http://WINDOWS_LAN_IP:11434/api/tags
 ```
 
-Confirm the requested model is loaded and inspect `ollama ps` on Windows. Keep local Qwen as the final fallback because it is reliable offline but generally weaker than the selected cloud routes.
+Confirm the requested model is loaded and inspect `ollama ps` on Windows. Configure Open WebUI with `configure-openwebui-providers.sh`, then select `HERMES LOCAL GPU` in the portal. This path uses native `/api/chat`; it does not send Qwen through Hermes' OpenAI-compatible fallback transport.
+
+For persistent startup, run `windows/Install-HermesOllamaTask.ps1` from elevated PowerShell. It installs the `Hermes Ollama Service` startup task and limits inbound port `11434` to the VM address. Validate from the VM with `/api/tags`, `/api/chat`, and `/api/ps`; the last check must report `size_vram` equal to `size` for `qwen3-4b-gpu:latest`.
+
+Use `windows/Test-HermesOllamaRecovery.ps1` for a controlled failure test. It terminates the serving process once and passes only when Task Scheduler starts a new process and reloads the complete model into VRAM.
 
 ## Telegram Activation
 

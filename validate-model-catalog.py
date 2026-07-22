@@ -55,9 +55,7 @@ prompts = {
     "designer": "Reply exactly: DESIGNER_OK",
     "consultant": "Reply exactly: CONSULTANT_OK",
     "coordinator": "Reply exactly: COORDINATOR_OK",
-    "nara-writer": "Reply exactly: NARA_WRITER_OK",
-    "nara-reasoner": "Reply exactly: NARA_REASONER_OK",
-    "nara-general": "Reply exactly: NARA_GENERAL_OK",
+    "hermes-local-gpu": "Reply exactly: LOCAL_GPU_OK",
 }
 
 results = []

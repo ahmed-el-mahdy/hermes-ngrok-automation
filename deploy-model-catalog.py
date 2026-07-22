@@ -40,12 +40,23 @@ MEMORY = "hermes_persistent_memory"
 EVAL = "agent_evaluator"
 
 
-def model(model_id, name, prompt, tools, description, base="hermes-agent", temperature=0.2):
+def model(
+    model_id,
+    name,
+    prompt,
+    tools,
+    description,
+    base="hermes-agent",
+    temperature=0.2,
+    inference_params=None,
+):
+    params = {"system": prompt.strip(), "temperature": temperature}
+    params.update(inference_params or {})
     return {
         "id": model_id,
         "base_model_id": base,
         "name": name,
-        "params": {"system": prompt.strip(), "temperature": temperature},
+        "params": params,
         "meta": {
             "profile_image_url": "/static/favicon.png",
             "description": description,
@@ -162,34 +173,33 @@ You maintain an evidence-based task board with TODO, IN_PROGRESS, BLOCKED, and D
         "Maintains persistent task state and evidence-based progress boards.",
     ),
     model(
-        "nara-writer",
-        "HERMES NARA WRITER",
-        "You are a concise writing specialist. Produce polished documentation, summaries, and reports. Save files only when asked and never claim a file exists without a File System Manager result.",
-        [FS],
-        "Cloud writing preset using the verified NaraRouter Mistral route.",
-        base="mistral-large",
-        temperature=0.3,
-    ),
-    model(
-        "nara-reasoner",
-        "HERMES NARA REASONER",
-        "You are a planning and reasoning specialist. Compare alternatives, state assumptions, expose risks, and give a clear recommendation. Do not claim external actions or current facts without evidence.",
-        [FS],
-        "Cloud reasoning preset using the verified NaraRouter GLM free route.",
-        base="glm-5.2-free",
-    ),
-    model(
-        "nara-general",
-        "HERMES NARA GENERAL",
-        "You are a general cloud fallback assistant. Be accurate, concise, and explicit about uncertainty. Use File System Manager only when the user requests a durable artifact.",
-        [FS],
-        "General cloud fallback preset using the verified NaraRouter GLM free route.",
-        base="glm-5.2-free",
+        "hermes-local-gpu",
+        "HERMES LOCAL GPU",
+        """
+You are the local HERMES assistant running on the workstation GPU. Answer directly and concisely. Use Arabic when the user writes Arabic. State when current web information or an external action cannot be verified. Do not invent tool calls, sources, files, or completed actions.
+""",
+        [],
+        "Always-available local Qwen model through Open WebUI's native Ollama API.",
+        base="qwen3-4b-gpu:latest",
+        inference_params={"think": False, "keep_alive": -1, "num_gpu": 999},
     ),
 ]
 
 status, result = request("/models/import", method="POST", payload={"models": models}, token=token)
 print(f"import_status={status}|result={result}")
+status, listing = request("/models/list", token=token)
+items = (listing or {}).get("items") or []
+ids_before_cleanup = {item.get("id", "") for item in items}
+for obsolete_id in ("nara-writer", "nara-reasoner", "nara-general"):
+    if obsolete_id in ids_before_cleanup:
+        delete_status, delete_result = request(
+            "/models/model/delete",
+            method="POST",
+            payload={"id": obsolete_id},
+            token=token,
+        )
+        print(f"delete_id={obsolete_id}|status={delete_status}|result={delete_result}")
+
 status, listing = request("/models/list", token=token)
 items = (listing or {}).get("items") or []
 ids = sorted(item.get("id", "") for item in items)

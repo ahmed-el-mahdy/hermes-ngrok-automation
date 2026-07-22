@@ -50,6 +50,8 @@ services:
       WEBUI_ADMIN_EMAIL: "${OPEN_WEBUI_ADMIN_EMAIL:-admin@hermes.local}"
       WEBUI_ADMIN_PASSWORD: "${OPEN_WEBUI_ADMIN_PASSWORD}"
       ENABLE_SIGNUP: "false"
+      ENABLE_OLLAMA_API: "true"
+      OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-http://192.168.1.2:11434}"
       ENABLE_OPENAI_API: "true"
       OPENAI_API_BASE_URL: "http://hermes-agent:${HERMES_API_PORT:-8642}/v1"
       OPENAI_API_KEY: "${API_SERVER_KEY}"
