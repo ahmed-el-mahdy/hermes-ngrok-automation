@@ -55,6 +55,9 @@ remain subject to Hermes security auditing before use.
 - Immediate fallback: local `qwen3-4b-gpu:latest` through the private Ollama bridge
 - Recovery routes: NaraRouter `glm-5.2-free`, OpenRouter, then Gemini 2.5 Flash
 - Auxiliary tasks: automatic routing through the same resilient chain
+- Delegated workers: pinned NaraRouter `mistral-large` primary with inherited
+  local-Qwen-first fallback; local Qwen primary when NaraRouter is unavailable
+- Delegation guard: one child at a time, 20 iterations, ten-minute hard limit
 
 The local Ollama model is fully loaded in GPU memory and is intended as an
 always-available fallback as well as a direct Open WebUI model. A private bridge
@@ -69,6 +72,9 @@ tool calls, without exposing another host port.
 - Independent model routes: 4 of 4 checks passed
 - Controlled HTTP 429 recovery: passed through local GPU Qwen with the original
   configuration restored automatically
+- Controlled delegated-worker HTTP 429 recovery: passed after observing both
+  the forced-429 request and the successful local-Qwen request; configuration
+  restored automatically
 - No pytest or smoke-test process remained running after validation
 
 Machine-readable evidence is stored on the VM under:

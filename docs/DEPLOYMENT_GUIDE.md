@@ -41,6 +41,15 @@ same chain instead of being pinned to Gemini. NaraRouter has a 15-second
 no-progress timeout; a healthy streaming response may continue normally, while a
 silent or queued request moves to local Qwen.
 
+`delegate_task` workers use a separate pinned primary:
+NaraRouter `mistral-large` when its credential exists, otherwise local
+`qwen3-4b-gpu:latest`. Hermes v0.19 passes the parent's fallback chain to every
+child, so a NaraRouter quota or availability failure immediately recovers through
+local Qwen. Only one delegated child runs at a time, preventing the parent and
+multiple children from exhausting the provider's request window together.
+Children have 20 iterations, a ten-minute wall-clock limit, and a 12,000
+character summary ceiling.
+
 Validate each provider independently before adding it to the fallback chain. Interpret common responses as follows:
 
 | HTTP status | Meaning |
@@ -83,6 +92,16 @@ bash validate-automatic-failover.sh
 It temporarily makes the primary route return HTTP 429, proves that the same
 request completes through local Qwen, and restores the original configuration
 even when the test exits early.
+
+Use the equivalent controlled test for a delegated worker:
+
+```bash
+bash validate-delegation-failover.sh
+```
+
+It leaves the parent's cloud route intact, forces only the child primary to
+return HTTP 429, verifies both the rejected child request and the successful
+local-Qwen recovery request, then restores the original configuration.
 
 Do not change ownership of `/opt/hermes` or run the complete upstream test suite as a health check. The agent terminal starts in `/opt/data/home`, with pytest cache at `/opt/data/cache/pytest` and temporary test output at `/opt/data/tmp`. When a source regression test is explicitly required, run only the relevant file with `timeout`, `--basetemp=/opt/data/tmp/pytest`, and `-o cache_dir=/opt/data/cache/pytest`.
 
@@ -207,6 +226,11 @@ Inspect `hermes-agent` logs, run `hermes-admin status`, verify its authenticated
 ### Agent repeats commands or appears stuck
 
 Confirm `tool_loop_guardrails.hard_stop_enabled` is true and rerun `configure-hermes-runtime.sh`. Every external operation should have a timeout; after two identical failures Hermes is instructed to change approach instead of repeating the command.
+
+For a delegated task, also confirm `delegation.max_concurrent_children` is `1`
+and inspect the child completion instead of starting a duplicate. A child
+provider `429`, timeout, or network error should continue through local Qwen via
+the inherited fallback chain.
 
 ### Node execution fails
 

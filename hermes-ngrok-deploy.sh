@@ -84,6 +84,7 @@ install -m 0755 "$SOURCE_DIR/hermes-smoke-test.sh" "$PROJECT_DIR/hermes-smoke-te
 install -m 0755 "$SOURCE_DIR/validate-hermes-runtime.py" "$PROJECT_DIR/validate-hermes-runtime.py"
 install -m 0755 "$SOURCE_DIR/validate-model-routes.py" "$PROJECT_DIR/validate-model-routes.py"
 install -m 0755 "$SOURCE_DIR/validate-automatic-failover.sh" "$PROJECT_DIR/validate-automatic-failover.sh"
+install -m 0755 "$SOURCE_DIR/validate-delegation-failover.sh" "$PROJECT_DIR/validate-delegation-failover.sh"
 install -m 0755 "$SOURCE_DIR/scripts/monitor_gold.py" "$PROJECT_DIR/scripts/monitor_gold.py"
 install -m 0644 "$SOURCE_DIR/Dockerfile.open-webui" "$PROJECT_DIR/Dockerfile.open-webui"
 
