@@ -64,6 +64,13 @@ Do not publish a preset for a route that does not return a successful chat compl
 
 Use `docker exec hermes-agent hermes-admin status` to inspect routing and `hermes-admin models` to list approved aliases without displaying credentials.
 
+Use `docker exec hermes-agent hermes-admin quota` for usage-limit questions.
+It reads the live public plan definition and performs a secret-safe
+authenticated model probe. Do not infer that a route is unlimited from
+`hermes-admin status`: NaraRouter's free baseline is 7M tokens/day and 10
+requests/minute, while the exact plan and remaining balance are available only
+in the provider dashboard when no quota headers are returned.
+
 ## Runtime Tooling
 
 The custom Hermes image includes Poppler, Tesseract Arabic OCR, PyMuPDF, pypdf, pdfplumber, python-docx, openpyxl, Beautiful Soup, lxml, `jq`, and `file`. Runtime setup fixes the persistent uv/Hugging Face cache ownership and provides a user-writable persistent Python package target.
@@ -123,6 +130,15 @@ For persistent startup, run `windows/Install-HermesOllamaTask.ps1` from elevated
 
 Use `windows/Test-HermesOllamaRecovery.ps1` for a controlled failure test. It terminates the serving process once and passes only when Task Scheduler starts a new process and reloads the complete model into VRAM.
 
+## PowerPoint And Telegram Attachments
+
+The Hermes image includes PptxGenJS, MarkItDown, LibreOffice Impress, and
+Poppler. A PowerPoint task is complete only after the file exists, its text can
+be extracted, and its rendered slides have been inspected. When the user asks
+for the file in Telegram, use `send_message` with
+`MEDIA:/absolute/path/file.pptx`; a printed path or MEDIA marker is not delivery
+evidence. Confirm the tool returned success before telling the user it was sent.
+
 ## Windows VM Startup
 
 Run `windows/Install-HermesVMTask.ps1` from the Windows repository checkout. It registers `Hermes VM Autostart` for the current interactive user at logon, copies the launcher to `%LOCALAPPDATA%\HermesVMStartup`, opens VMware Workstation, and starts `E:\VM\Ubuntu Mini Serv2\Clone of Ubuntu 64-bit.vmx` only when needed.
@@ -144,6 +160,7 @@ Create a bot with BotFather and obtain the numeric Telegram user ID that is allo
 ```dotenv
 TELEGRAM_BOT_TOKEN=replace_me
 TELEGRAM_ALLOWED_USERS=123456789
+TELEGRAM_HOME_CHANNEL=123456789
 TELEGRAM_REQUIRE_MENTION=true
 ```
 

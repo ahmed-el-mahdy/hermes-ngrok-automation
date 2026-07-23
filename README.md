@@ -94,6 +94,14 @@ Use `bash validate-delegation-failover.sh` after a routing change to force only
 the child route to return HTTP 429, prove recovery through local Qwen, and
 restore the original configuration automatically.
 
+`hermes-admin quota` reports the live public NaraRouter plan limits and probes
+the authenticated model catalog without exposing credentials. The current free
+baseline is 7,000,000 tokens per day and 10 requests per minute. NaraRouter does
+not expose the account's exact remaining balance through its documented API or
+response headers, so Hermes reports that value as dashboard-only instead of
+claiming unlimited usage. Local Qwen has no cloud quota, but remains bounded by
+GPU capacity, context, and request concurrency.
+
 ### Persistent Windows Ollama
 
 Install the Windows boot task from an elevated PowerShell session:
@@ -159,11 +167,17 @@ The image includes:
 
 - PDF text extraction with Poppler, PyMuPDF, pypdf, and pdfplumber
 - DOCX and XLSX handling with python-docx and openpyxl
+- PPTX creation with PptxGenJS, extraction with MarkItDown, and rendering with
+  LibreOffice Impress
 - Arabic and English OCR with Tesseract
 - HTML parsing with Beautiful Soup and lxml
 - `jq`, `file`, and the Hermes CLI on `PATH`
 
 Runtime loop guardrails stop repeated failures, terminal and delegated work have bounded timeouts, and cron runs only one job at a time. OpenRouter requests stop after 60 seconds, silent streams stop after 45 seconds, a complete gateway request stops after five minutes, and a delegated child gets up to ten minutes. The agent policy tells Hermes to use the installed key-free DDGS `web_search` backend and `browser_snapshot` instead of looking for a nonexistent `web-search` skill.
+
+Generated files are not considered complete until they exist, pass a
+format-specific validation, and, when requested in Telegram, are delivered as
+a native attachment through `send_message` with a successful tool result.
 
 Run the bounded readiness check instead of the upstream Hermes test suite:
 

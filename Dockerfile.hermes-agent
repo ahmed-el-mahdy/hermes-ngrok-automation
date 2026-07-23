@@ -4,12 +4,15 @@ ENV VIRTUAL_ENV=/opt/hermes/.venv
 ENV PIP_TARGET=/opt/data/python-packages
 ENV PYTHONPATH=/opt/data/python-packages
 ENV UV_CACHE_DIR=/opt/data/cache/uv
+ENV NODE_PATH=/usr/local/lib/node_modules
 
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         file \
+        fonts-liberation \
         jq \
         libmagic1 \
+        libreoffice-impress \
         poppler-utils \
         tesseract-ocr \
         tesseract-ocr-ara \
@@ -28,11 +31,14 @@ RUN uv pip install \
     "pypdf>=5.4,<7" \
     "pdfplumber>=0.11,<1" \
     "openpyxl>=3.1,<4" \
+    "markitdown[pptx]==0.1.6" \
     "fastapi>=0.116,<1" \
     "httpx>=0.28,<1" \
     "uvicorn>=0.35,<1" \
     "pytest>=8.3,<10" \
     "pip>=25,<27"
+
+RUN npm install --global --omit=dev "pptxgenjs@4.0.1"
 
 COPY patch-hermes-stt.py /tmp/patch-hermes-stt.py
 RUN /opt/hermes/.venv/bin/python /tmp/patch-hermes-stt.py \
@@ -47,6 +53,13 @@ COPY validate-telegram.py /usr/local/bin/validate-telegram
 COPY validate-model-routes.py /usr/local/bin/validate-model-routes
 COPY ollama-openai-bridge.py /opt/hermes-extensions/ollama-openai-bridge.py
 RUN chmod 0755 \
+    /usr/local/bin/hermes-admin \
+    /usr/local/bin/hermes-smoke-test \
+    /usr/local/bin/validate-hermes-runtime \
+    /usr/local/bin/validate-telegram \
+    /usr/local/bin/validate-model-routes \
+    /opt/hermes-extensions/ollama-openai-bridge.py \
+    && sed -i 's/\r$//' \
     /usr/local/bin/hermes-admin \
     /usr/local/bin/hermes-smoke-test \
     /usr/local/bin/validate-hermes-runtime \
