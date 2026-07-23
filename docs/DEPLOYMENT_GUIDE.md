@@ -60,6 +60,20 @@ For persistent startup, run `windows/Install-HermesOllamaTask.ps1` from elevated
 
 Use `windows/Test-HermesOllamaRecovery.ps1` for a controlled failure test. It terminates the serving process once and passes only when Task Scheduler starts a new process and reloads the complete model into VRAM.
 
+## Windows VM Startup
+
+Run `windows/Install-HermesVMTask.ps1` from the Windows repository checkout. It registers `Hermes VM Autostart` for the current interactive user at logon, copies the launcher to `%LOCALAPPDATA%\HermesVMStartup`, opens VMware Workstation, and starts `E:\VM\Ubuntu Mini Serv2\Clone of Ubuntu 64-bit.vmx` only when needed.
+
+The launcher waits for SSH at `192.168.1.5` and then for the public portal. Failures are retried by Task Scheduler and logged to `%LOCALAPPDATA%\HermesVMStartup\startup.log`. The VM must retain bridged networking and its reserved address. Inside Ubuntu, Docker and `open-vm-tools` must be enabled, while the three Compose services must keep `restart: unless-stopped`.
+
+Inspect the task after installation:
+
+```powershell
+Get-ScheduledTask -TaskName "Hermes VM Autostart"
+Get-ScheduledTaskInfo -TaskName "Hermes VM Autostart"
+Get-Content "$env:LOCALAPPDATA\HermesVMStartup\startup.log" -Tail 30
+```
+
 ## Telegram Activation
 
 Create a bot with BotFather and obtain the numeric Telegram user ID that is allowed to use it. Add these to `~/hermes-ngrok/.env`:

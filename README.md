@@ -92,6 +92,16 @@ Run a controlled restart test from an elevated PowerShell session:
 powershell -ExecutionPolicy Bypass -File .\windows\Test-HermesOllamaRecovery.ps1
 ```
 
+### Persistent VMware Hermes VM
+
+Install the interactive logon task from PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\windows\Install-HermesVMTask.ps1
+```
+
+The `Hermes VM Autostart` task opens VMware Workstation, starts `Ubuntu Mini Hermes` only when it is not already running, waits for SSH at `192.168.1.5`, and verifies the public Hermes portal. Its launcher is copied to `%LOCALAPPDATA%\HermesVMStartup`, and startup results are written to `startup.log` there. Docker and all three Hermes containers are configured to start automatically inside Ubuntu, so no Ubuntu password is stored in the Windows task.
+
 After Ollama is reachable, configure the two supported portal connections and publish the model catalog:
 
 ```bash
