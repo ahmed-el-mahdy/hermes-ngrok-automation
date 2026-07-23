@@ -11,6 +11,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import urllib.request
 
 import yaml
 
@@ -41,10 +42,13 @@ MODULES = (
     "docx",
     "ddgs",
     "fitz",
+    "fastapi",
+    "httpx",
     "lxml",
     "openpyxl",
     "pdfplumber",
     "pypdf",
+    "uvicorn",
 )
 
 
@@ -81,12 +85,46 @@ checks["writable_terminal_cwd"] = (
 )
 checks["serialized_cron"] = config.get("cron", {}).get("max_parallel_jobs") == 1
 checks["fallbacks"] = len(config.get("fallback_providers") or []) >= 1
+fallbacks = config.get("fallback_providers") or []
+checks["local_gpu_first_fallback"] = bool(
+    fallbacks
+    and fallbacks[0].get("provider") == "ollama-local"
+    and fallbacks[0].get("model") == "qwen3-4b-gpu:latest"
+)
+custom_providers = {
+    item.get("name"): item
+    for item in (config.get("custom_providers") or [])
+    if isinstance(item, dict) and item.get("name")
+}
+checks["ollama_bridge_configured"] = (
+    custom_providers.get("ollama-local", {}).get("base_url")
+    == "http://ollama-bridge:8000/v1"
+)
+if os.getenv("NARAROUTER_API_KEY"):
+    checks["nararouter_primary"] = (
+        config.get("model", {}).get("provider") == "nararouter"
+        and config.get("model", {}).get("default") == "mistral-large"
+    )
+    checks["nararouter_key_env"] = (
+        custom_providers.get("nararouter", {}).get("key_env")
+        == "NARAROUTER_API_KEY"
+    )
+checks["auxiliary_auto_routing"] = all(
+    not isinstance(settings, dict) or settings.get("provider") == "auto"
+    for settings in (config.get("auxiliary") or {}).values()
+)
 checks["ddgs_search"] = config.get("web", {}).get("search_backend") == "ddgs"
 checks["provider_timeout"] = (
     config.get("providers", {}).get("openrouter", {}).get(
         "request_timeout_seconds"
     )
     == 60
+)
+checks["nararouter_stale_timeout"] = (
+    config.get("providers", {}).get("nararouter", {}).get(
+        "stale_timeout_seconds"
+    )
+    == 15
 )
 checks["gateway_timeout"] = config.get("agent", {}).get("gateway_timeout") == 300
 checks["runtime_policy"] = "[HERMES_RUNTIME_POLICY]" in str(
@@ -173,6 +211,17 @@ checks["user_hermes_link"] = Path("/opt/data/.local/bin/hermes").is_symlink()
 checks["gold_monitor_installed"] = Path(
     "/opt/data/home/.hermes/scripts/monitor_gold.py"
 ).is_file()
+try:
+    with urllib.request.urlopen(
+        "http://ollama-bridge:8000/health", timeout=10
+    ) as response:
+        bridge_health = json.load(response)
+    checks["ollama_bridge_live"] = bool(
+        bridge_health.get("status") == "ok"
+        and bridge_health.get("gpu_resident") is True
+    )
+except (OSError, ValueError):
+    checks["ollama_bridge_live"] = False
 
 if args.network:
     from tools.web_tools import web_search_tool

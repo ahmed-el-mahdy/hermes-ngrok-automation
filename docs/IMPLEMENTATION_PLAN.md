@@ -13,8 +13,11 @@ flowchart LR
   U[User browser] --> N[ngrok HTTPS]
   N --> W[Open WebUI]
   W --> H[Hermes API gateway]
-  H --> G[OpenRouter primary and free fallback]
-  G --> GF[Gemini final fallback]
+  H --> N[NaraRouter primary]
+  H --> B[Private Ollama bridge]
+  H --> G[OpenRouter recovery]
+  H --> GF[Gemini final cloud recovery]
+  B --> O
   W --> O[Windows Ollama native API]
   W --> D[(Open WebUI volume)]
   H --> C[(Hermes data)]

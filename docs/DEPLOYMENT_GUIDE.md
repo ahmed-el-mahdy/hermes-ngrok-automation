@@ -32,7 +32,14 @@ Each deployment wrapper creates a timestamped database backup under `~/hermes-ba
 
 ## Model Routing
 
-Cloud routing is stored in `~/.hermes/config.yaml` and secrets in `~/.hermes/.env`. Run `bash configure-hermes-runtime.sh` after adding provider keys. The automatic order is explicit OpenRouter Nemotron, explicit `openai/gpt-oss-20b:free`, `openrouter/free`, and then Gemini 2.5 Flash. This keeps exhausted Gemini quota or one slow free route from stalling every chat. Local Qwen is a separate model in Open WebUI because Hermes' fallback transport uses OpenAI chat completions while this Qwen build responds correctly through Ollama's native API.
+Cloud routing is stored in `~/.hermes/config.yaml` and provider secrets remain in the Compose environment or persistent Hermes environment. Run `bash configure-hermes-runtime.sh` after adding provider keys. The automatic order is NaraRouter Mistral, local GPU Qwen, NaraRouter GLM, OpenRouter Nemotron, OpenRouter's free router, and Gemini 2.5 Flash. The local route is deliberately second so exhausted cloud quotas cannot stop the task.
+
+`hermes-ollama-bridge` is private to the Compose network. It converts Hermes'
+OpenAI-compatible requests to Ollama's native `/api/chat`, including streaming
+and tool calls. All auxiliary tasks use `provider: auto`, so they inherit this
+same chain instead of being pinned to Gemini. NaraRouter has a 15-second
+no-progress timeout; a healthy streaming response may continue normally, while a
+silent or queued request moves to local Qwen.
 
 Validate each provider independently before adding it to the fallback chain. Interpret common responses as follows:
 
@@ -64,7 +71,18 @@ Use the bounded smoke test for routine readiness:
 
 ```bash
 docker exec -u 10000 hermes-agent hermes-smoke-test
+docker exec -u 10000 hermes-agent validate-model-routes
 ```
+
+After routing changes, run the controlled recovery test once:
+
+```bash
+bash validate-automatic-failover.sh
+```
+
+It temporarily makes the primary route return HTTP 429, proves that the same
+request completes through local Qwen, and restores the original configuration
+even when the test exits early.
 
 Do not change ownership of `/opt/hermes` or run the complete upstream test suite as a health check. The agent terminal starts in `/opt/data/home`, with pytest cache at `/opt/data/cache/pytest` and temporary test output at `/opt/data/tmp`. When a source regression test is explicitly required, run only the relevant file with `timeout`, `--basetemp=/opt/data/tmp/pytest`, and `-o cache_dir=/opt/data/cache/pytest`.
 
@@ -80,7 +98,7 @@ The Windows Ollama listener must be reachable only from the trusted LAN/VM netwo
 curl -fsS http://WINDOWS_LAN_IP:11434/api/tags
 ```
 
-Confirm the requested model is loaded and inspect `ollama ps` on Windows. Configure Open WebUI with `configure-openwebui-providers.sh`, then select `HERMES LOCAL GPU` in the portal. This path uses native `/api/chat`; it does not send Qwen through Hermes' OpenAI-compatible fallback transport.
+Confirm the requested model is loaded and inspect `ollama ps` on Windows. Configure Open WebUI with `configure-openwebui-providers.sh`, then select `HERMES LOCAL GPU` in the portal. Open WebUI uses native `/api/chat` directly; Hermes reaches the same native endpoint through the private compatibility bridge when automatic fallback is needed.
 
 For persistent startup, run `windows/Install-HermesOllamaTask.ps1` from elevated PowerShell. It installs the `Hermes Ollama Service` startup task and limits inbound port `11434` to the VM address. Validate from the VM with `/api/tags`, `/api/chat`, and `/api/ps`; the last check must report `size_vram` equal to `size` for `qwen3-4b-gpu:latest`.
 
@@ -176,7 +194,7 @@ The automation scripts place SQLite and configuration snapshots in `~/hermes-bac
 
 ### ngrok endpoint offline
 
-Check all three containers and confirm ngrok targets `open-webui:8080` on the shared Compose network.
+Check all four containers and confirm ngrok targets `open-webui:8080` on the shared Compose network.
 
 ### Open WebUI login loops
 

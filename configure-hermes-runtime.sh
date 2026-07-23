@@ -84,12 +84,20 @@ if ! docker exec hermes-agent /opt/hermes/.venv/bin/python \
   echo "WARNING: runtime configured, but the external gold feeds were unavailable" >&2
 fi
 
-docker compose --env-file .env -f docker-compose.yml restart hermes-agent >/dev/null
+docker compose --env-file .env -f docker-compose.yml restart \
+  ollama-bridge hermes-agent >/dev/null
 
 healthy=0
+bridge_healthy=0
 for _ in $(seq 1 45); do
   status="$(curl -sS -o /dev/null --max-time 4 -w '%{http_code}' \
     http://127.0.0.1:8642/health 2>/dev/null || true)"
+  bridge_status="$(docker exec hermes-ollama-bridge sh -lc \
+    "curl -sS -o /dev/null --max-time 4 -w '%{http_code}' http://127.0.0.1:8000/health" \
+    2>/dev/null || true)"
+  if [[ "$bridge_status" == "200" ]]; then
+    bridge_healthy=1
+  fi
   if [[ "$status" == "200" ]]; then
     healthy=1
     break
@@ -104,6 +112,10 @@ if [[ "$healthy" -ne 1 ]]; then
   docker restart hermes-agent >/dev/null
   echo "ERROR: Hermes did not become healthy; previous config restored" >&2
   exit 1
+fi
+
+if [[ "$bridge_healthy" -ne 1 ]]; then
+  echo "WARNING: Hermes is healthy, but the local GPU bridge is not ready yet" >&2
 fi
 
 if ! docker exec -u 10000 hermes-agent timeout 15s \
