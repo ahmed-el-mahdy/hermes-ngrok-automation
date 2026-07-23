@@ -156,6 +156,8 @@ docker exec -u 10000 hermes-agent hermes-smoke-test
 
 The terminal starts in writable `/opt/data/home`; pytest cache and temporary files stay under `/opt/data/cache/pytest` and `/opt/data/tmp`. `/opt/hermes` remains immutable. Full source and gateway integration suites are not routine health checks and should only be run as targeted, explicitly requested tests.
 
+Gateway progress such as `iteration 1/20` means the agent completed its first tool/reasoning loop out of a maximum of 20; it is not a test counter. The smoke report exposes explicit `passed_count` and `check_count` fields. Telegram uses a recent secret-free live-health attestation when terminal security removes bot credentials from the child process.
+
 ### Gold Monitor
 
 The daily cron script is installed at `~/.hermes/scripts/monitor_gold.py`. It reads live XAU/USD and USD/EGP JSON feeds, calculates an indicative 21K EGP price, stores an atomic history under `~/.hermes/state`, and alerts only when the configured percentage is crossed. The result excludes Egyptian dealer margin and workmanship, so it must be confirmed locally before a purchase.

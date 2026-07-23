@@ -68,6 +68,8 @@ docker exec -u 10000 hermes-agent hermes-smoke-test
 
 Do not change ownership of `/opt/hermes` or run the complete upstream test suite as a health check. The agent terminal starts in `/opt/data/home`, with pytest cache at `/opt/data/cache/pytest` and temporary test output at `/opt/data/tmp`. When a source regression test is explicitly required, run only the relevant file with `timeout`, `--basetemp=/opt/data/tmp/pytest`, and `-o cache_dir=/opt/data/cache/pytest`.
 
+`iteration X/Y` is the agent loop count, not the number of tests. Read `passed_count/check_count` from the smoke output. Telegram status falls back to a recent secret-free live-health record when terminal secret scrubbing removes the bot token from the test process.
+
 The gold monitor lives at `~/.hermes/scripts/monitor_gold.py`; cron must reference only `monitor_gold.py`, not an absolute path. Its 21K value is an indicative global spot conversion and excludes dealer margins and workmanship.
 
 ## Local Ollama Model

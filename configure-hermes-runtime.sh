@@ -106,6 +106,11 @@ if [[ "$healthy" -ne 1 ]]; then
   exit 1
 fi
 
+if ! docker exec -u 10000 hermes-agent timeout 15s \
+  validate-telegram --write-status; then
+  echo "WARNING: Telegram live validation was unavailable" >&2
+fi
+
 echo "runtime=ready"
 echo "backup_dir=$backup_dir"
 docker exec hermes-agent hermes-admin status

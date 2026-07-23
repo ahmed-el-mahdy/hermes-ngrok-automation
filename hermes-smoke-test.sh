@@ -9,8 +9,9 @@ export XDG_CACHE_HOME="/opt/data/cache"
 export HF_HOME="/opt/data/cache/huggingface"
 export TMPDIR="/opt/data/tmp"
 export PYTEST_ADDOPTS="-o cache_dir=/opt/data/cache/pytest"
+export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 
 printf '%s\n' "Running bounded Hermes capability checks..."
 timeout 35s validate-hermes-runtime --network
-timeout 15s validate-telegram
+timeout 15s validate-telegram --allow-cached
 printf '%s\n' "hermes_smoke_test=passed"

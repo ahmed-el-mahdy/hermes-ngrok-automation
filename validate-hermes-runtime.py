@@ -170,8 +170,12 @@ if args.network:
         search.get("success") and search.get("data", {}).get("web")
     )
 
+failed_checks = sorted(name for name, passed in checks.items() if not passed)
 report = {
-    "passed": all(checks.values()),
+    "passed": not failed_checks,
+    "passed_count": sum(1 for passed in checks.values() if passed),
+    "check_count": len(checks),
+    "failed_checks": failed_checks,
     "checks": checks,
     "primary": (
         f"{config.get('model', {}).get('provider', '')}/"
