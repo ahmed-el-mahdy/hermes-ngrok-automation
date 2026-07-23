@@ -1,4 +1,28 @@
 services:
+  ollama-bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile.hermes-agent
+    image: hermes-agent:local
+    container_name: hermes-ollama-bridge
+    restart: unless-stopped
+    entrypoint:
+      - /opt/hermes/.venv/bin/python
+      - /opt/hermes-extensions/ollama-openai-bridge.py
+    environment:
+      OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-http://192.168.1.2:11434}"
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-qwen3-4b-gpu:latest}"
+      OLLAMA_BRIDGE_TIMEOUT: "${OLLAMA_BRIDGE_TIMEOUT:-180}"
+      OLLAMA_KEEP_ALIVE: "${OLLAMA_KEEP_ALIVE:-24h}"
+      OLLAMA_THINK: "${OLLAMA_THINK:-false}"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/health >/dev/null"]
+      interval: 20s
+      timeout: 10s
+      retries: 6
+    networks:
+      - hermes_net
+
   hermes-agent:
     build:
       context: .
@@ -36,6 +60,9 @@ services:
       - "${HERMES_LOG_DIR:-/home/cyber/hermes-ngrok/logs}:/var/log/hermes"
     networks:
       - hermes_net
+    depends_on:
+      ollama-bridge:
+        condition: service_started
 
   open-webui:
     build:

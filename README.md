@@ -11,17 +11,20 @@ Browser
   -> ngrok HTTPS endpoint
   -> Open WebUI :8080
      -> Hermes OpenAI-compatible API :8642
-        -> OpenRouter free primary/fallback, then Gemini fallback
+        -> NaraRouter primary
+        -> local Ollama bridge and GPU fallback
+        -> OpenRouter and Gemini recovery routes
      -> Windows Ollama native API :11434
         -> qwen3-4b-gpu:latest
 ```
 
-The deployment uses three containers on one private Docker bridge network:
+The deployment uses four containers on one private Docker bridge network:
 
 | Container | Purpose | Host exposure |
 | --- | --- | --- |
 | `hermes-open-webui` | Authenticated chat dashboard | `127.0.0.1:3000` |
 | `hermes-agent` | Agent gateway and model router | `127.0.0.1:8642` |
+| `hermes-ollama-bridge` | Native Ollama to OpenAI compatibility bridge | None |
 | `hermes-ngrok` | HTTPS tunnel to Open WebUI | `127.0.0.1:4040` management API |
 
 ngrok Basic Auth and OAuth are intentionally absent. Users authenticate once with the Open WebUI email/password form.
@@ -71,12 +74,14 @@ Container recreation does not remove these locations. Do not use `docker compose
 
 The validated automatic cloud routing policy inside Hermes is:
 
-1. `nvidia/nemotron-3-super-120b-a12b:free` through OpenRouter
-2. `openai/gpt-oss-20b:free`
-3. `openrouter/free`
-4. `gemini-2.5-flash`
+1. `mistral-large` through NaraRouter
+2. `qwen3-4b-gpu:latest` through the local Ollama bridge
+3. `glm-5.2-free` through NaraRouter
+4. `nvidia/nemotron-3-super-120b-a12b:free` through OpenRouter
+5. `openrouter/free`
+6. `gemini-2.5-flash`
 
-The explicit OpenRouter models and automatic free router were live-tested with tool calling. Nemotron is first because it had the lowest direct response latency in the live checks. Gemini remains a final fallback because exhausted Google quota must not block ordinary sessions. The local model is published separately as `hermes-local-gpu`. Open WebUI calls `qwen3-4b-gpu:latest` through Ollama's native `/api/chat` endpoint, which preserves Ollama reasoning behavior and avoids the empty-content responses seen through the OpenAI compatibility endpoint. Provider credentials are runtime secrets and must never be committed.
+NaraRouter Mistral, NaraRouter GLM, and local Qwen were live-tested with tool calling. The local GPU route is deliberately second so one exhausted cloud quota cannot stop or significantly delay the task. A 15-second no-progress timeout moves a slow NaraRouter call to local Qwen instead of leaving the user waiting. The private `hermes-ollama-bridge` translates Hermes OpenAI-wire requests to Ollama's reliable native `/api/chat` endpoint; it is not exposed on the host or through ngrok. All auxiliary tasks use `provider: auto` and inherit the same failover chain instead of being pinned to Gemini. Open WebUI also keeps its direct native Ollama connection and publishes the local model separately as `hermes-local-gpu`. Provider credentials are runtime secrets and must never be committed.
 
 ### Persistent Windows Ollama
 
@@ -102,7 +107,7 @@ Install the interactive logon task from PowerShell:
 powershell -ExecutionPolicy Bypass -File .\windows\Install-HermesVMTask.ps1
 ```
 
-The `Hermes VM Autostart` task opens VMware Workstation, starts `Ubuntu Mini Hermes` only when it is not already running, waits for SSH at `192.168.1.5`, and verifies the public Hermes portal. Its launcher is copied to `%LOCALAPPDATA%\HermesVMStartup`, and startup results are written to `startup.log` there. Docker and all three Hermes containers are configured to start automatically inside Ubuntu, so no Ubuntu password is stored in the Windows task.
+The `Hermes VM Autostart` task opens VMware Workstation, starts `Ubuntu Mini Hermes` only when it is not already running, waits for SSH at `192.168.1.5`, and verifies the public Hermes portal. Its launcher is copied to `%LOCALAPPDATA%\HermesVMStartup`, and startup results are written to `startup.log` there. Docker and all four Hermes containers are configured to start automatically inside Ubuntu, so no Ubuntu password is stored in the Windows task.
 
 After Ollama is reachable, configure the two supported portal connections and publish the model catalog:
 
@@ -129,14 +134,15 @@ Inspect or switch an approved Hermes route without printing credentials:
 ```bash
 docker exec hermes-agent hermes-admin status
 docker exec hermes-agent hermes-admin models
-docker exec hermes-agent hermes-admin use openrouter-gpt
+docker exec hermes-agent hermes-admin use nara-mistral
+docker exec hermes-agent hermes-admin use local-gpu
 ```
 
 Changes selected with `hermes-admin use` apply to new sessions.
 
 ## Autonomous Runtime
 
-`configure-hermes-runtime.sh` fixes persistent cache ownership and installs a shell profile that exposes `hermes`, `hermes-admin`, `pip`, and `uv` to agent terminal sessions. Python packages installed with `pip` persist under `/opt/data/python-packages`.
+`configure-hermes-runtime.sh` fixes persistent cache ownership, applies the resilient cloud/local failover policy, and installs a shell profile that exposes `hermes`, `hermes-admin`, `pip`, and `uv` to agent terminal sessions. Python packages installed with `pip` persist under `/opt/data/python-packages`.
 
 The image includes:
 

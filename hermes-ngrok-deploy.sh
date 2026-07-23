@@ -76,11 +76,14 @@ mkdir -p "$PROJECT_DIR/scripts"
 install -m 0644 "$SOURCE_DIR/docker-compose.yml" "$COMPOSE_FILE"
 install -m 0644 "$SOURCE_DIR/Dockerfile.hermes-agent" "$PROJECT_DIR/Dockerfile.hermes-agent"
 install -m 0644 "$SOURCE_DIR/patch-hermes-stt.py" "$PROJECT_DIR/patch-hermes-stt.py"
+install -m 0755 "$SOURCE_DIR/ollama-openai-bridge.py" "$PROJECT_DIR/ollama-openai-bridge.py"
 install -m 0755 "$SOURCE_DIR/hermes-admin.py" "$PROJECT_DIR/hermes-admin.py"
 install -m 0755 "$SOURCE_DIR/configure-hermes-runtime.py" "$PROJECT_DIR/configure-hermes-runtime.py"
 install -m 0755 "$SOURCE_DIR/configure-hermes-runtime.sh" "$PROJECT_DIR/configure-hermes-runtime.sh"
 install -m 0755 "$SOURCE_DIR/hermes-smoke-test.sh" "$PROJECT_DIR/hermes-smoke-test.sh"
 install -m 0755 "$SOURCE_DIR/validate-hermes-runtime.py" "$PROJECT_DIR/validate-hermes-runtime.py"
+install -m 0755 "$SOURCE_DIR/validate-model-routes.py" "$PROJECT_DIR/validate-model-routes.py"
+install -m 0755 "$SOURCE_DIR/validate-automatic-failover.sh" "$PROJECT_DIR/validate-automatic-failover.sh"
 install -m 0755 "$SOURCE_DIR/scripts/monitor_gold.py" "$PROJECT_DIR/scripts/monitor_gold.py"
 install -m 0644 "$SOURCE_DIR/Dockerfile.open-webui" "$PROJECT_DIR/Dockerfile.open-webui"
 
@@ -97,7 +100,6 @@ if [[ ! -f "$ENV_FILE" ]]; then
   cat > "$ENV_FILE" <<EOF
 NGROK_AUTHTOKEN=$NGROK_AUTHTOKEN
 API_SERVER_KEY=$API_SERVER_KEY
-HERMES_DASHBOARD_PORT=9119
 HERMES_API_PORT=8642
 OPEN_WEBUI_PORT=3000
 OPEN_WEBUI_NAME=Hermes Open WebUI
@@ -122,7 +124,7 @@ fi
 [[ -n "$(env_value OPEN_WEBUI_ADMIN_PASSWORD)" ]] || die "OPEN_WEBUI_ADMIN_PASSWORD is missing in $ENV_FILE"
 [[ -n "$(env_value OPEN_WEBUI_SECRET_KEY)" ]] || die "OPEN_WEBUI_SECRET_KEY is missing in $ENV_FILE"
 
-info "Building and starting Hermes, Open WebUI, and ngrok"
+info "Building and starting Hermes, the local GPU bridge, Open WebUI, and ngrok"
 compose up -d --build
 
 for _ in $(seq 1 45); do

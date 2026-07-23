@@ -51,21 +51,24 @@ remain subject to Hermes security auditing before use.
 
 ## Model Routing
 
-- Primary cloud route: OpenRouter Nemotron free
-- Cloud fallbacks: GPT OSS free, OpenRouter free router, then Gemini 2.5 Flash
-- Auxiliary low-latency tasks: Gemini 2.5 Flash where a valid Gemini key exists
-- Local route: `qwen3-4b-gpu:latest` through Open WebUI's native Ollama API
+- Primary cloud route: NaraRouter `mistral-large`
+- Immediate fallback: local `qwen3-4b-gpu:latest` through the private Ollama bridge
+- Recovery routes: NaraRouter `glm-5.2-free`, OpenRouter, then Gemini 2.5 Flash
+- Auxiliary tasks: automatic routing through the same resilient chain
 
 The local Ollama model is fully loaded in GPU memory and is intended as an
-always-available direct model. Hermes cloud routing continues to use the
-OpenAI-compatible providers because this Ollama build's compatibility endpoint
-does not respond reliably, while its native API does.
+always-available fallback as well as a direct Open WebUI model. A private bridge
+converts Hermes requests to Ollama's reliable native API, including streaming and
+tool calls, without exposing another host port.
 
 ## Acceptance Evidence
 
-- Hermes runtime smoke test: 53 of 53 checks passed
+- Hermes runtime smoke test: 63 of 63 checks passed with live web validation
 - Telegram live validation: 3 of 3 checks passed
 - Open WebUI model catalog: 11 of 11 models returned successful responses
+- Independent model routes: 4 of 4 checks passed
+- Controlled HTTP 429 recovery: passed through local GPU Qwen with the original
+  configuration restored automatically
 - No pytest or smoke-test process remained running after validation
 
 Machine-readable evidence is stored on the VM under:

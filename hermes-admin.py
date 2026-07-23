@@ -18,8 +18,28 @@ ENV_PATH = Path(os.environ.get("HERMES_ENV", "/opt/data/.env"))
 BACKUP_DIR = Path(os.environ.get("HERMES_BACKUP_DIR", "/opt/data/backups/runtime"))
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta"
+NARAROUTER_URL = "https://router.bynara.id/v1"
+OLLAMA_BRIDGE_URL = "http://ollama-bridge:8000/v1"
 
 ALIASES = {
+    "nara-mistral": {
+        "provider": "nararouter",
+        "default": "mistral-large",
+        "base_url": NARAROUTER_URL,
+        "credential": "NARAROUTER_API_KEY",
+    },
+    "nara-glm": {
+        "provider": "nararouter",
+        "default": "glm-5.2-free",
+        "base_url": NARAROUTER_URL,
+        "credential": "NARAROUTER_API_KEY",
+    },
+    "local-gpu": {
+        "provider": "ollama-local",
+        "default": "qwen3-4b-gpu:latest",
+        "base_url": OLLAMA_BRIDGE_URL,
+        "credential": None,
+    },
     "openrouter-gpt": {
         "provider": "openrouter",
         "default": "openai/gpt-oss-20b:free",
@@ -121,16 +141,22 @@ def main() -> int:
     if args.command == "models":
         available = configured_names()
         for alias, model in ALIASES.items():
-            state = "ready" if model["credential"] in available else "missing-key"
+            credential = model["credential"]
+            state = (
+                "ready"
+                if credential is None or credential in available
+                else "missing-key"
+            )
             print(
                 f"{alias}: {model['provider']}/{model['default']} [{state}]"
             )
         return 0
 
     selected = ALIASES[args.alias]
-    if selected["credential"] not in configured_names():
+    credential = selected["credential"]
+    if credential is not None and credential not in configured_names():
         parser.error(
-            f"{selected['credential']} is not configured; model was not changed"
+            f"{credential} is not configured; model was not changed"
         )
     config["model"] = {
         "default": selected["default"],

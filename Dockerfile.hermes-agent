@@ -28,6 +28,9 @@ RUN uv pip install \
     "pypdf>=5.4,<7" \
     "pdfplumber>=0.11,<1" \
     "openpyxl>=3.1,<4" \
+    "fastapi>=0.116,<1" \
+    "httpx>=0.28,<1" \
+    "uvicorn>=0.35,<1" \
     "pytest>=8.3,<10" \
     "pip>=25,<27"
 
@@ -41,8 +44,12 @@ COPY hermes-admin.py /usr/local/bin/hermes-admin
 COPY hermes-smoke-test.sh /usr/local/bin/hermes-smoke-test
 COPY validate-hermes-runtime.py /usr/local/bin/validate-hermes-runtime
 COPY validate-telegram.py /usr/local/bin/validate-telegram
+COPY validate-model-routes.py /usr/local/bin/validate-model-routes
+COPY ollama-openai-bridge.py /opt/hermes-extensions/ollama-openai-bridge.py
 RUN chmod 0755 \
     /usr/local/bin/hermes-admin \
     /usr/local/bin/hermes-smoke-test \
     /usr/local/bin/validate-hermes-runtime \
-    /usr/local/bin/validate-telegram
+    /usr/local/bin/validate-telegram \
+    /usr/local/bin/validate-model-routes \
+    /opt/hermes-extensions/ollama-openai-bridge.py
