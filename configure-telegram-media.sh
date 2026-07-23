@@ -44,9 +44,42 @@ voice = config.setdefault('voice', {})
 voice['auto_tts'] = False
 voice['max_recording_seconds'] = 120
 
+has_openrouter = bool(os.environ.get('OPENROUTER_API_KEY', '').strip())
+has_nararouter = bool(os.environ.get('NARAROUTER_API_KEY', '').strip())
+has_gemini = any(
+    os.environ.get(name, '').strip()
+    for name in ('GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_GENAI_API_KEY')
+)
+vision = config.setdefault('auxiliary', {}).setdefault('vision', {})
+vision.update({
+    'timeout': 120,
+    'temperature': 0.1,
+    'download_timeout': 30,
+    'base_url': '',
+    'api_key': '',
+    'fallback_chain': [],
+})
+if has_nararouter:
+    vision['provider'] = 'nararouter'
+    vision['model'] = 'mistral-medium-3-5'
+    if has_gemini:
+        vision['fallback_chain'] = [{
+            'provider': 'gemini',
+            'model': 'gemini-2.5-flash',
+        }]
+elif has_gemini:
+    vision['provider'] = 'gemini'
+    vision['model'] = 'gemini-2.5-flash'
+elif has_openrouter:
+    vision['provider'] = 'openrouter'
+    vision['model'] = 'google/gemma-4-26b-a4b-it:free'
+else:
+    vision['provider'] = 'auto'
+    vision['model'] = ''
+
 marker = '[TELEGRAM_MEDIA_POLICY]'
 policy = '''[TELEGRAM_MEDIA_POLICY]
-Speak to this user in natural, clear Egyptian Arabic by default, using familiar Egyptian wording without exaggerating slang. Switch languages when the user asks. For Telegram media: analyze attached images directly and explain what is visible, while stating uncertainty when needed. Incoming voice messages are transcribed automatically; answer their meaning rather than discussing the audio file path. When the user explicitly asks for a voice or audio reply in Arabic or English, call the text_to_speech tool so Telegram receives a playable voice message. Do not generate voice for ordinary text replies unless explicitly requested.'''
+Speak to this user in natural, clear Egyptian Arabic by default, using familiar Egyptian wording without exaggerating slang. Switch languages when the user asks. For Telegram media: analyze attached images directly and explain what is visible, while stating uncertainty when needed. An attached image path means the image is available: never claim that image analysis is unsupported when pre-analysis or vision_analyze returned visual content. If a vision result is a refusal such as "cannot view" or "cannot analyze", treat it as a failed vision route and retry through the configured vision fallback rather than repeating the refusal. Incoming voice messages are transcribed automatically; answer their meaning rather than discussing the audio file path. When the user explicitly asks for a voice or audio reply in Arabic or English, call the text_to_speech tool so Telegram receives a playable voice message. Do not generate voice for ordinary text replies unless explicitly requested.'''
 agent = config.setdefault('agent', {})
 existing = str(agent.get('system_prompt') or '').strip()
 if marker in existing:
@@ -81,6 +114,7 @@ for _ in $(seq 1 60); do
     echo "stt=local/$STT_MODEL"
     echo "stt_language=${STT_LANGUAGE:-auto}"
     echo "tts=edge/$TTS_VOICE"
+    docker exec -u 10000 hermes-agent hermes config get auxiliary.vision
     echo 'auto_tts=false'
     echo "backup_dir=$backup_dir"
     exit 0

@@ -51,6 +51,7 @@ COPY hermes-smoke-test.sh /usr/local/bin/hermes-smoke-test
 COPY validate-hermes-runtime.py /usr/local/bin/validate-hermes-runtime
 COPY validate-telegram.py /usr/local/bin/validate-telegram
 COPY validate-model-routes.py /usr/local/bin/validate-model-routes
+COPY validate-vision.py /usr/local/bin/validate-vision
 COPY ollama-openai-bridge.py /opt/hermes-extensions/ollama-openai-bridge.py
 RUN chmod 0755 \
     /usr/local/bin/hermes-admin \
@@ -58,6 +59,7 @@ RUN chmod 0755 \
     /usr/local/bin/validate-hermes-runtime \
     /usr/local/bin/validate-telegram \
     /usr/local/bin/validate-model-routes \
+    /usr/local/bin/validate-vision \
     /opt/hermes-extensions/ollama-openai-bridge.py \
     && sed -i 's/\r$//' \
     /usr/local/bin/hermes-admin \
@@ -65,4 +67,5 @@ RUN chmod 0755 \
     /usr/local/bin/validate-hermes-runtime \
     /usr/local/bin/validate-telegram \
     /usr/local/bin/validate-model-routes \
+    /usr/local/bin/validate-vision \
     /opt/hermes-extensions/ollama-openai-bridge.py

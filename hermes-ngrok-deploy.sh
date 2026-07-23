@@ -82,7 +82,9 @@ install -m 0755 "$SOURCE_DIR/configure-hermes-runtime.py" "$PROJECT_DIR/configur
 install -m 0755 "$SOURCE_DIR/configure-hermes-runtime.sh" "$PROJECT_DIR/configure-hermes-runtime.sh"
 install -m 0755 "$SOURCE_DIR/hermes-smoke-test.sh" "$PROJECT_DIR/hermes-smoke-test.sh"
 install -m 0755 "$SOURCE_DIR/validate-hermes-runtime.py" "$PROJECT_DIR/validate-hermes-runtime.py"
+install -m 0755 "$SOURCE_DIR/validate-telegram.py" "$PROJECT_DIR/validate-telegram.py"
 install -m 0755 "$SOURCE_DIR/validate-model-routes.py" "$PROJECT_DIR/validate-model-routes.py"
+install -m 0755 "$SOURCE_DIR/validate-vision.py" "$PROJECT_DIR/validate-vision.py"
 install -m 0755 "$SOURCE_DIR/validate-automatic-failover.sh" "$PROJECT_DIR/validate-automatic-failover.sh"
 install -m 0755 "$SOURCE_DIR/validate-delegation-failover.sh" "$PROJECT_DIR/validate-delegation-failover.sh"
 install -m 0755 "$SOURCE_DIR/scripts/monitor_gold.py" "$PROJECT_DIR/scripts/monitor_gold.py"
@@ -125,8 +127,21 @@ fi
 [[ -n "$(env_value OPEN_WEBUI_ADMIN_PASSWORD)" ]] || die "OPEN_WEBUI_ADMIN_PASSWORD is missing in $ENV_FILE"
 [[ -n "$(env_value OPEN_WEBUI_SECRET_KEY)" ]] || die "OPEN_WEBUI_SECRET_KEY is missing in $ENV_FILE"
 
+existing_agent=0
+if [[ "$(docker inspect -f '{{.State.Running}}' hermes-agent 2>/dev/null || true)" == "true" ]]; then
+  existing_agent=1
+  info "Applying the durable runtime profile before the single service replacement"
+  HERMES_PROJECT_DIR="$PROJECT_DIR" HERMES_RUNTIME_SKIP_RESTART=1 \
+    bash "$PROJECT_DIR/configure-hermes-runtime.sh"
+fi
+
 info "Building and starting Hermes, the local GPU bridge, Open WebUI, and ngrok"
-compose up -d --build
+if [[ "$existing_agent" -eq 1 ]]; then
+  compose up -d --build --force-recreate ollama-bridge hermes-agent
+  compose up -d open-webui ngrok-hermes
+else
+  compose up -d --build
+fi
 
 for _ in $(seq 1 45); do
   if docker exec hermes-agent test -s /opt/data/config.yaml 2>/dev/null; then
@@ -137,8 +152,10 @@ done
 docker exec hermes-agent test -s /opt/data/config.yaml \
   || die "Hermes did not create its persistent config"
 
-info "Applying the durable Hermes runtime profile"
-HERMES_PROJECT_DIR="$PROJECT_DIR" bash "$PROJECT_DIR/configure-hermes-runtime.sh"
+if [[ "$existing_agent" -eq 0 ]]; then
+  info "Applying the durable Hermes runtime profile"
+  HERMES_PROJECT_DIR="$PROJECT_DIR" bash "$PROJECT_DIR/configure-hermes-runtime.sh"
+fi
 
 for _ in $(seq 1 60); do
   health="$(docker inspect hermes-open-webui --format '{{.State.Health.Status}}' 2>/dev/null || true)"

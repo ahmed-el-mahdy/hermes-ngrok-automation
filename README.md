@@ -141,6 +141,12 @@ Apply the routing policy and runtime hardening without putting keys in the repos
 bash configure-hermes-runtime.sh
 ```
 
+The standalone command performs one controlled Hermes restart so the new
+configuration is loaded. During a deployment, `hermes-ngrok-deploy.sh` applies
+the profile with `HERMES_RUNTIME_SKIP_RESTART=1` before replacing the affected
+services once. This avoids repeated Telegram shutdown notices and interrupted
+tasks.
+
 Published Open WebUI profiles:
 
 - `hermes`
@@ -252,7 +258,7 @@ Enable the low-cost media profile after Telegram activation:
 bash configure-telegram-media.sh
 ```
 
-This profile uses local `faster-whisper large-v3-turbo` with forced Arabic decoding, Egyptian Arabic context, beam search, and silence filtering for incoming voice messages. Free Edge TTS with `ar-EG-ShakirNeural` handles outgoing Arabic speech. The Whisper model is downloaded during setup and cached under persistent Hermes data, so container recreation does not download it again. Ordinary replies stay text-only; Hermes generates an OGG/Opus Telegram voice note when the user explicitly asks for a voice reply. Telegram photos, image documents, and static stickers are cached and passed to the configured vision-capable Gemini model. Hermes answers this user in clear Egyptian Arabic by default.
+This profile uses local `faster-whisper large-v3-turbo` with forced Arabic decoding, Egyptian Arabic context, beam search, and silence filtering for incoming voice messages. Free Edge TTS with `ar-EG-ShakirNeural` handles outgoing Arabic speech. The Whisper model is downloaded during setup and cached under persistent Hermes data, so container recreation does not download it again. Ordinary replies stay text-only; Hermes generates an OGG/Opus Telegram voice note when the user explicitly asks for a voice reply. Telegram photos, image documents, and static stickers are cached and sent first to NaraRouter's multimodal `mistral-medium-3-5`; direct Gemini 2.5 Flash is the automatic vision fallback when configured. OpenRouter's free multimodal Gemma route is used only when neither NaraRouter nor Gemini is available. Hermes answers this user in clear Egyptian Arabic by default.
 
 Override the defaults when needed:
 

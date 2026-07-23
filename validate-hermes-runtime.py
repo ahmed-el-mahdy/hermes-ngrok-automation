@@ -39,6 +39,7 @@ COMMANDS = (
     "pip",
     "tesseract",
     "uv",
+    "validate-vision",
 )
 MODULES = (
     "bs4",
@@ -114,8 +115,10 @@ if os.getenv("NARAROUTER_API_KEY"):
         == "NARAROUTER_API_KEY"
     )
 checks["auxiliary_auto_routing"] = all(
-    not isinstance(settings, dict) or settings.get("provider") == "auto"
-    for settings in (config.get("auxiliary") or {}).values()
+    task == "vision"
+    or not isinstance(settings, dict)
+    or settings.get("provider") == "auto"
+    for task, settings in (config.get("auxiliary") or {}).items()
 )
 delegation = config.get("delegation") or {}
 expected_delegation_provider = (
@@ -140,6 +143,29 @@ checks["delegation_concurrency_guard"] = (
 )
 checks["delegation_summary_guard"] = delegation.get("max_summary_chars") == 12000
 checks["ddgs_search"] = config.get("web", {}).get("search_backend") == "ddgs"
+vision = config.get("auxiliary", {}).get("vision", {})
+checks["vision_route"] = (
+    (
+        vision.get("provider") == "nararouter"
+        and vision.get("model") == "mistral-medium-3-5"
+    )
+    or (
+        vision.get("provider") == "openrouter"
+        and vision.get("model") == "google/gemma-4-26b-a4b-it:free"
+    )
+    or (
+        vision.get("provider") == "gemini"
+        and vision.get("model") == "gemini-2.5-flash"
+    )
+)
+vision_fallback = vision.get("fallback_chain") or []
+if vision_fallback:
+    checks["vision_fallback"] = any(
+        entry.get("provider") == "gemini"
+        and entry.get("model") == "gemini-2.5-flash"
+        for entry in vision_fallback
+        if isinstance(entry, dict)
+    )
 checks["provider_timeout"] = (
     config.get("providers", {}).get("openrouter", {}).get(
         "request_timeout_seconds"

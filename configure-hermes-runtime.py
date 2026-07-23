@@ -252,6 +252,34 @@ code_execution["max_tool_calls"] = 30
 web = config.setdefault("web", {})
 web["search_backend"] = "ddgs"
 
+auxiliary = config.setdefault("auxiliary", {})
+vision = auxiliary.setdefault("vision", {})
+vision["timeout"] = 120
+vision["temperature"] = 0.1
+vision["download_timeout"] = 30
+vision["base_url"] = ""
+vision["api_key"] = ""
+vision["fallback_chain"] = []
+if has_nararouter:
+    vision["provider"] = "nararouter"
+    vision["model"] = "mistral-medium-3-5"
+    if has_gemini:
+        vision["fallback_chain"].append(
+            {
+                "provider": "gemini",
+                "model": "gemini-2.5-flash",
+            }
+        )
+elif has_gemini:
+    vision["provider"] = "gemini"
+    vision["model"] = "gemini-2.5-flash"
+elif has_openrouter:
+    vision["provider"] = "openrouter"
+    vision["model"] = "google/gemma-4-26b-a4b-it:free"
+else:
+    vision["provider"] = "auto"
+    vision["model"] = ""
+
 delegation = config.setdefault("delegation", {})
 delegation["provider"] = "nararouter" if has_nararouter else "ollama-local"
 delegation["model"] = "mistral-large" if has_nararouter else LOCAL_MODEL
@@ -280,8 +308,10 @@ gemini = providers.setdefault("gemini", {})
 gemini["request_timeout_seconds"] = 45
 gemini["stale_timeout_seconds"] = 30
 
-for settings in (config.get("auxiliary") or {}).values():
+for task, settings in (config.get("auxiliary") or {}).items():
     if isinstance(settings, dict):
+        if task == "vision":
+            continue
         settings["provider"] = "auto"
         settings["model"] = ""
         settings["base_url"] = ""
@@ -294,3 +324,4 @@ print(f"gemini_ready={str(has_gemini).lower()}")
 print(f"primary={config['model']['provider']}/{config['model']['default']}")
 print(f"fallback_count={len(config.get('fallback_providers') or [])}")
 print(f"telegram_home_channel={telegram_home_channel or 'not-configured'}")
+print(f"vision={vision['provider']}/{vision['model']}")

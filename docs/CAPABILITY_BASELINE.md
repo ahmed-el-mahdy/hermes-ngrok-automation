@@ -60,6 +60,8 @@ remain subject to Hermes security auditing before use.
 - Delegated workers: pinned NaraRouter `mistral-large` primary with inherited
   local-Qwen-first fallback; local Qwen primary when NaraRouter is unavailable
 - Delegation guard: one child at a time, 20 iterations, ten-minute hard limit
+- Vision route: NaraRouter `mistral-medium-3-5` first, direct Gemini 2.5 Flash
+  fallback; never inherit the text-only NaraRouter `mistral-large` chat model
 
 NaraRouter's live free-plan baseline is 7M tokens per day and 10 requests per
 minute. The documented API does not return an exact remaining balance or quota
