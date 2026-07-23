@@ -81,6 +81,19 @@ docker exec -u 10000 hermes-agent sh -lc \
   '. /opt/data/home/.hermes_env; hermes-admin status; pip --version'
 ```
 
+The standalone runtime command performs one controlled restart. For an update
+that will recreate the container, apply the configuration first and skip that
+internal restart, then replace Hermes once:
+
+```bash
+HERMES_RUNTIME_SKIP_RESTART=1 bash configure-hermes-runtime.sh
+docker compose up -d --build --force-recreate ollama-bridge hermes-agent
+```
+
+The main deployment script uses this sequence automatically. Do not run both
+the default runtime command and a separate forced recreation during the same
+maintenance window.
+
 The runtime profile also enables repeated-failure hard stops, limits OpenRouter requests to 60 seconds and silent streams to 45 seconds, limits the complete gateway request to five minutes, serializes cron jobs, installs the key-free DDGS search backend, and documents the correct direct web-tool names for the agent.
 
 Use the bounded smoke test for routine readiness:
@@ -176,7 +189,7 @@ Never set `GATEWAY_ALLOW_ALL_USERS=true` or `TELEGRAM_ALLOW_ALL_USERS=true` on a
 
 ### Telegram Media
 
-Run `bash configure-telegram-media.sh` to enable the persistent media profile. It builds `Dockerfile.hermes-agent` with Hermes' pinned `faster-whisper` dependencies and a guarded STT tuning patch, configures forced-Arabic transcription with Egyptian context and silence filtering, selects an Egyptian Arabic Edge TTS voice, keeps automatic TTS disabled, and adds instructions for Egyptian Arabic conversation and on-demand audio replies.
+Run `bash configure-telegram-media.sh` to enable the persistent media profile. It builds `Dockerfile.hermes-agent` with Hermes' pinned `faster-whisper` dependencies and a guarded STT tuning patch, configures forced-Arabic transcription with Egyptian context and silence filtering, selects an Egyptian Arabic Edge TTS voice, keeps automatic TTS disabled, and adds instructions for Egyptian Arabic conversation and on-demand audio replies. Vision is pinned to NaraRouter's multimodal `mistral-medium-3-5` instead of inheriting the text-only main model, with direct Gemini 2.5 Flash as the configured fallback. OpenRouter's free multimodal Gemma route is used only when neither of those credentials is available.
 
 The default `large-v3-turbo` model was selected from a real Egyptian Telegram sample: it preserved the Egyptian wording while transcribing in 16.4 seconds, compared with 21.8 seconds for `medium`; `small` was faster but misheard important words. Setup prefetches the selected model into `/opt/data/cache/huggingface`. Set `STT_MODEL=small` only when lower latency matters more than transcription accuracy.
 
@@ -184,7 +197,7 @@ Validation should cover all three paths:
 
 ```text
 Telegram voice -> cached OGG -> local Whisper -> agent response
-Telegram photo -> cached image -> Gemini vision -> agent response
+Telegram photo -> cached image -> NaraRouter Mistral Medium vision -> Gemini fallback -> agent response
 Explicit voice request -> Edge TTS -> OGG/Opus -> Telegram voice note
 ```
 

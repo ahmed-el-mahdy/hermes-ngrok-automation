@@ -84,8 +84,13 @@ if ! docker exec hermes-agent /opt/hermes/.venv/bin/python \
   echo "WARNING: runtime configured, but the external gold feeds were unavailable" >&2
 fi
 
-docker compose --env-file .env -f docker-compose.yml restart \
-  ollama-bridge hermes-agent >/dev/null
+skip_restart="${HERMES_RUNTIME_SKIP_RESTART:-0}"
+if [[ "$skip_restart" =~ ^(1|true|yes)$ ]]; then
+  echo "runtime_restart=skipped"
+else
+  docker compose --env-file .env -f docker-compose.yml restart \
+    ollama-bridge hermes-agent >/dev/null
+fi
 
 healthy=0
 bridge_healthy=0
