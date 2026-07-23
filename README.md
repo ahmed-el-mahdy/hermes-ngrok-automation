@@ -83,6 +83,13 @@ The validated automatic cloud routing policy inside Hermes is:
 
 NaraRouter Mistral, NaraRouter GLM, and local Qwen were live-tested with tool calling. The local GPU route is deliberately second so one exhausted cloud quota cannot stop or significantly delay the task. A 15-second no-progress timeout moves a slow NaraRouter call to local Qwen instead of leaving the user waiting. The private `hermes-ollama-bridge` translates Hermes OpenAI-wire requests to Ollama's reliable native `/api/chat` endpoint; it is not exposed on the host or through ngrok. All auxiliary tasks use `provider: auto` and inherit the same failover chain instead of being pinned to Gemini. Open WebUI also keeps its direct native Ollama connection and publishes the local model separately as `hermes-local-gpu`. Provider credentials are runtime secrets and must never be committed.
 
+Delegated workers are pinned independently to NaraRouter `mistral-large` when
+that provider is configured and inherit the same fallback chain, so their first
+recovery route is local GPU Qwen. Without NaraRouter they run locally from the
+start. Delegation is serialized to one child at a time to protect provider
+request quotas and GPU capacity; each child has 20 iterations and a ten-minute
+wall-clock budget for bounded, verifiable work.
+
 ### Persistent Windows Ollama
 
 Install the Windows boot task from an elevated PowerShell session:
@@ -152,7 +159,7 @@ The image includes:
 - HTML parsing with Beautiful Soup and lxml
 - `jq`, `file`, and the Hermes CLI on `PATH`
 
-Runtime loop guardrails stop repeated failures, terminal and delegated work have bounded timeouts, and cron runs only one job at a time. OpenRouter requests stop after 60 seconds, silent streams stop after 45 seconds, and a complete gateway request stops after five minutes. The agent policy tells Hermes to use the installed key-free DDGS `web_search` backend and `browser_snapshot` instead of looking for a nonexistent `web-search` skill.
+Runtime loop guardrails stop repeated failures, terminal and delegated work have bounded timeouts, and cron runs only one job at a time. OpenRouter requests stop after 60 seconds, silent streams stop after 45 seconds, a complete gateway request stops after five minutes, and a delegated child gets up to ten minutes. The agent policy tells Hermes to use the installed key-free DDGS `web_search` backend and `browser_snapshot` instead of looking for a nonexistent `web-search` skill.
 
 Run the bounded readiness check instead of the upstream Hermes test suite:
 

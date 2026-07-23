@@ -113,6 +113,28 @@ checks["auxiliary_auto_routing"] = all(
     not isinstance(settings, dict) or settings.get("provider") == "auto"
     for settings in (config.get("auxiliary") or {}).values()
 )
+delegation = config.get("delegation") or {}
+expected_delegation_provider = (
+    "nararouter" if os.getenv("NARAROUTER_API_KEY") else "ollama-local"
+)
+expected_delegation_model = (
+    "mistral-large"
+    if expected_delegation_provider == "nararouter"
+    else "qwen3-4b-gpu:latest"
+)
+checks["delegation_route"] = (
+    delegation.get("provider") == expected_delegation_provider
+    and delegation.get("model") == expected_delegation_model
+)
+checks["delegation_completion_budget"] = (
+    delegation.get("max_iterations") == 20
+    and delegation.get("child_timeout_seconds") == 600
+)
+checks["delegation_concurrency_guard"] = (
+    delegation.get("max_concurrent_children") == 1
+    and delegation.get("max_spawn_depth") == 1
+)
+checks["delegation_summary_guard"] = delegation.get("max_summary_chars") == 12000
 checks["ddgs_search"] = config.get("web", {}).get("search_backend") == "ddgs"
 checks["provider_timeout"] = (
     config.get("providers", {}).get("openrouter", {}).get(
@@ -131,6 +153,9 @@ checks["runtime_policy"] = "[HERMES_RUNTIME_POLICY]" in str(
     config.get("agent", {}).get("system_prompt") or ""
 )
 checks["general_agent_identity"] = "general-purpose personal assistant" in str(
+    config.get("agent", {}).get("system_prompt") or ""
+)
+checks["delegation_policy"] = "Delegated workers use" in str(
     config.get("agent", {}).get("system_prompt") or ""
 )
 checks["verify_on_stop"] = config.get("agent", {}).get("verify_on_stop") == "auto"
