@@ -28,6 +28,7 @@ COMMANDS = (
     "file",
     "hermes",
     "hermes-admin",
+    "hermes-smoke-test",
     "jq",
     "pdfinfo",
     "pdftotext",
@@ -75,6 +76,9 @@ checks["loop_hard_stop"] = (
 checks["shell_profile"] = config.get("terminal", {}).get("shell_init_files") == [
     "/opt/data/home/.hermes_env"
 ]
+checks["writable_terminal_cwd"] = (
+    config.get("terminal", {}).get("cwd") == "/opt/data/home"
+)
 checks["serialized_cron"] = config.get("cron", {}).get("max_parallel_jobs") == 1
 checks["fallbacks"] = len(config.get("fallback_providers") or []) >= 1
 checks["ddgs_search"] = config.get("web", {}).get("search_backend") == "ddgs"
@@ -92,7 +96,9 @@ checks["runtime_policy"] = "[HERMES_RUNTIME_POLICY]" in str(
 for raw_path in (
     "/opt/data/cache/uv",
     "/opt/data/cache/huggingface",
+    "/opt/data/cache/pytest",
     "/opt/data/python-packages",
+    "/opt/data/tmp",
 ):
     path = Path(raw_path)
     checks[f"owner_{path.name}"] = path.stat().st_uid == 10000
@@ -124,10 +130,34 @@ with tempfile.TemporaryDirectory(prefix="hermes-runtime-") as raw_temp:
         for paragraph in reader.paragraphs
     )
 
+with tempfile.TemporaryDirectory(
+    prefix="pytest-smoke-", dir="/opt/data/tmp"
+) as raw_pytest_temp:
+    pytest_temp = Path(raw_pytest_temp)
+    test_file = pytest_temp / "test_runtime.py"
+    test_file.write_text(
+        "def test_runtime_cache():\n    assert True\n",
+        encoding="utf-8",
+    )
+    pytest_output = run(
+        "/opt/hermes/.venv/bin/python",
+        "-m",
+        "pytest",
+        str(test_file),
+        "-q",
+        "--basetemp",
+        str(pytest_temp / "basetemp"),
+        "-o",
+        "cache_dir=/opt/data/cache/pytest",
+        timeout=30,
+    )
+    checks["pytest_targeted"] = "1 passed" in pytest_output
+
 languages = run("tesseract", "--list-langs")
 checks["ocr_arabic"] = "ara" in languages.split()
 checks["hermes_admin"] = "primary=" in run("hermes-admin", "status")
 checks["pip_wrapper"] = "pip " in run("pip", "--version").lower()
+checks["user_hermes_link"] = Path("/opt/data/.local/bin/hermes").is_symlink()
 checks["gold_monitor_installed"] = Path(
     "/opt/data/home/.hermes/scripts/monitor_gold.py"
 ).is_file()

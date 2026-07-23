@@ -49,9 +49,7 @@ for path in (Path("/opt/data/cache/uv"), Path("/opt/data/cache/huggingface")):
     assert path.stat().st_uid == 10000, f"wrong owner: {path}"
 PY
 docker exec hermes-agent hermes-admin status
-docker exec -u 10000 hermes-agent sh -lc \
-  '. /opt/data/home/.hermes_env && timeout 30s validate-hermes-runtime --network'
-docker exec hermes-agent timeout 15s validate-telegram
+docker exec -u 10000 hermes-agent hermes-smoke-test
 docker exec -u 10000 hermes-agent timeout 25s \
   /opt/hermes/.venv/bin/python /opt/data/home/.hermes/scripts/monitor_gold.py \
   --state /tmp/hermes-gold-validation.json --always-report

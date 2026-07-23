@@ -33,13 +33,15 @@ RUN uv pip install \
 COPY patch-hermes-stt.py /tmp/patch-hermes-stt.py
 RUN /opt/hermes/.venv/bin/python /tmp/patch-hermes-stt.py \
     && rm /tmp/patch-hermes-stt.py \
-    && ln -sf /opt/hermes/bin/hermes /usr/local/bin/hermes \
+    && ln -sf /opt/hermes/.venv/bin/hermes /usr/local/bin/hermes \
     && ln -sf /opt/hermes/.venv/bin/python /usr/local/bin/hermes-python
 
 COPY hermes-admin.py /usr/local/bin/hermes-admin
+COPY hermes-smoke-test.sh /usr/local/bin/hermes-smoke-test
 COPY validate-hermes-runtime.py /usr/local/bin/validate-hermes-runtime
 COPY validate-telegram.py /usr/local/bin/validate-telegram
 RUN chmod 0755 \
     /usr/local/bin/hermes-admin \
+    /usr/local/bin/hermes-smoke-test \
     /usr/local/bin/validate-hermes-runtime \
     /usr/local/bin/validate-telegram

@@ -60,6 +60,14 @@ docker exec -u 10000 hermes-agent sh -lc \
 
 The runtime profile also enables repeated-failure hard stops, limits OpenRouter requests to 60 seconds and silent streams to 45 seconds, limits the complete gateway request to five minutes, serializes cron jobs, installs the key-free DDGS search backend, and documents the correct direct web-tool names for the agent.
 
+Use the bounded smoke test for routine readiness:
+
+```bash
+docker exec -u 10000 hermes-agent hermes-smoke-test
+```
+
+Do not change ownership of `/opt/hermes` or run the complete upstream test suite as a health check. The agent terminal starts in `/opt/data/home`, with pytest cache at `/opt/data/cache/pytest` and temporary test output at `/opt/data/tmp`. When a source regression test is explicitly required, run only the relevant file with `timeout`, `--basetemp=/opt/data/tmp/pytest`, and `-o cache_dir=/opt/data/cache/pytest`.
+
 The gold monitor lives at `~/.hermes/scripts/monitor_gold.py`; cron must reference only `monitor_gold.py`, not an absolute path. Its 21K value is an indicative global spot conversion and excludes dealer margins and workmanship.
 
 ## Local Ollama Model

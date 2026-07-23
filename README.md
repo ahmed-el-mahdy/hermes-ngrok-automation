@@ -148,6 +148,14 @@ The image includes:
 
 Runtime loop guardrails stop repeated failures, terminal and delegated work have bounded timeouts, and cron runs only one job at a time. OpenRouter requests stop after 60 seconds, silent streams stop after 45 seconds, and a complete gateway request stops after five minutes. The agent policy tells Hermes to use the installed key-free DDGS `web_search` backend and `browser_snapshot` instead of looking for a nonexistent `web-search` skill.
 
+Run the bounded readiness check instead of the upstream Hermes test suite:
+
+```bash
+docker exec -u 10000 hermes-agent hermes-smoke-test
+```
+
+The terminal starts in writable `/opt/data/home`; pytest cache and temporary files stay under `/opt/data/cache/pytest` and `/opt/data/tmp`. `/opt/hermes` remains immutable. Full source and gateway integration suites are not routine health checks and should only be run as targeted, explicitly requested tests.
+
 ### Gold Monitor
 
 The daily cron script is installed at `~/.hermes/scripts/monitor_gold.py`. It reads live XAU/USD and USD/EGP JSON feeds, calculates an indicative 21K EGP price, stores an atomic history under `~/.hermes/state`, and alerts only when the configured percentage is crossed. The result excludes Egyptian dealer margin and workmanship, so it must be confirmed locally before a purchase.

@@ -19,24 +19,40 @@ docker cp "$SCRIPT_DIR/scripts/monitor_gold.py" \
 docker exec -u root hermes-agent sh -lc '
   set -eu
   install -d -o 10000 -g 10000 -m 0750 \
+    /opt/data/.local/bin \
     /opt/data/backups/runtime \
     /opt/data/bin \
+    /opt/data/cache/pytest \
     /opt/data/cache/uv \
     /opt/data/cache/huggingface \
     /opt/data/home/.hermes/scripts \
     /opt/data/home/.hermes/state \
-    /opt/data/python-packages
+    /opt/data/python-packages \
+    /opt/data/tmp
   chown -R 10000:10000 \
+    /opt/data/cache/pytest \
     /opt/data/cache/uv \
     /opt/data/cache/huggingface \
-    /opt/data/python-packages
+    /opt/data/python-packages \
+    /opt/data/tmp
+
+  ln -sf /opt/hermes/.venv/bin/hermes /opt/data/.local/bin/hermes
+  ln -sf /usr/local/bin/hermes-admin /opt/data/.local/bin/hermes-admin
+  ln -sf /usr/local/bin/hermes-smoke-test /opt/data/.local/bin/hermes-smoke-test
+  chown -h 10000:10000 \
+    /opt/data/.local/bin/hermes \
+    /opt/data/.local/bin/hermes-admin \
+    /opt/data/.local/bin/hermes-smoke-test
 
   cat > /opt/data/home/.hermes_env <<"EOF"
-export PATH="/opt/data/bin:/usr/local/bin:/opt/hermes/bin:/opt/hermes/.venv/bin:$PATH"
+export PATH="/opt/data/.local/bin:/opt/data/bin:/usr/local/bin:/opt/hermes/bin:/opt/hermes/.venv/bin:$PATH"
 export PIP_TARGET="/opt/data/python-packages"
 export PYTHONPATH="/opt/data/python-packages${PYTHONPATH:+:$PYTHONPATH}"
 export UV_CACHE_DIR="/opt/data/cache/uv"
+export XDG_CACHE_HOME="/opt/data/cache"
 export HF_HOME="/opt/data/cache/huggingface"
+export TMPDIR="/opt/data/tmp"
+export PYTEST_ADDOPTS="-o cache_dir=/opt/data/cache/pytest"
 EOF
 
   cat > /opt/data/bin/pip <<"EOF"
