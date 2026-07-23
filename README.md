@@ -90,6 +90,10 @@ start. Delegation is serialized to one child at a time to protect provider
 request quotas and GPU capacity; each child has 20 iterations and a ten-minute
 wall-clock budget for bounded, verifiable work.
 
+Use `bash validate-delegation-failover.sh` after a routing change to force only
+the child route to return HTTP 429, prove recovery through local Qwen, and
+restore the original configuration automatically.
+
 ### Persistent Windows Ollama
 
 Install the Windows boot task from an elevated PowerShell session:

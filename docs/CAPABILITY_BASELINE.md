@@ -72,6 +72,9 @@ tool calls, without exposing another host port.
 - Independent model routes: 4 of 4 checks passed
 - Controlled HTTP 429 recovery: passed through local GPU Qwen with the original
   configuration restored automatically
+- Controlled delegated-worker HTTP 429 recovery: passed after observing both
+  the forced-429 request and the successful local-Qwen request; configuration
+  restored automatically
 - No pytest or smoke-test process remained running after validation
 
 Machine-readable evidence is stored on the VM under:

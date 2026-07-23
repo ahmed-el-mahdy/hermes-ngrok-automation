@@ -93,6 +93,16 @@ It temporarily makes the primary route return HTTP 429, proves that the same
 request completes through local Qwen, and restores the original configuration
 even when the test exits early.
 
+Use the equivalent controlled test for a delegated worker:
+
+```bash
+bash validate-delegation-failover.sh
+```
+
+It leaves the parent's cloud route intact, forces only the child primary to
+return HTTP 429, verifies both the rejected child request and the successful
+local-Qwen recovery request, then restores the original configuration.
+
 Do not change ownership of `/opt/hermes` or run the complete upstream test suite as a health check. The agent terminal starts in `/opt/data/home`, with pytest cache at `/opt/data/cache/pytest` and temporary test output at `/opt/data/tmp`. When a source regression test is explicitly required, run only the relevant file with `timeout`, `--basetemp=/opt/data/tmp/pytest`, and `-o cache_dir=/opt/data/cache/pytest`.
 
 `iteration X/Y` is the agent loop count, not the number of tests. Read `passed_count/check_count` from the smoke output. Telegram status falls back to a recent secret-free live-health record when terminal secret scrubbing removes the bot token from the test process.
