@@ -1,8 +1,8 @@
 # Hermes Open WebUI Automation
 
-Deploy Hermes Agent behind Open WebUI and publish only the Open WebUI login through ngrok. The Hermes dashboard and API remain bound to the VM loopback interface.
+Deploy Hermes Agent behind Open WebUI and publish only the Open WebUI login through ngrok. The native Hermes dashboard is disabled; the Hermes API remains bound to the VM loopback interface.
 
-The custom dashboard image is pinned to Open WebUI `v0.10.2` and adds Node.js for the canonical Code Executor tool. The custom Hermes image adds local voice, document extraction, OCR, web parsing, and persistent Python package support.
+The custom dashboard image is pinned to Open WebUI `v0.10.2` and adds Node.js for the canonical Code Executor tool. The custom Hermes image is pinned to the tested Hermes release `v2026.7.20` and adds local voice, document extraction, OCR, web parsing, and persistent Python package support. Release upgrades are deliberate and must pass the voice, Telegram, browser, document, and runtime checks before the pin moves.
 
 ## Architecture
 
@@ -21,7 +21,7 @@ The deployment uses three containers on one private Docker bridge network:
 | Container | Purpose | Host exposure |
 | --- | --- | --- |
 | `hermes-open-webui` | Authenticated chat dashboard | `127.0.0.1:3000` |
-| `hermes-agent` | Agent gateway and model router | `127.0.0.1:8642`, `127.0.0.1:9119` |
+| `hermes-agent` | Agent gateway and model router | `127.0.0.1:8642` |
 | `hermes-ngrok` | HTTPS tunnel to Open WebUI | `127.0.0.1:4040` management API |
 
 ngrok Basic Auth and OAuth are intentionally absent. Users authenticate once with the Open WebUI email/password form.
@@ -180,6 +180,14 @@ Path traversal, shell operators, and private-network URL requests are rejected. 
 
 The deployment library contains ten reusable prompts for coding, research, project building, review, orchestration, continuation, durable memory, recommendations, scraping, and debugging. They are installed through Open WebUI's prompt API, not direct database edits.
 
+## Agent Identity
+
+HERMES is a general-purpose personal assistant and execution agent for research, software, automation, documents, planning, learning, communication, and analysis. Specialist knowledge is loaded only for the task that needs it. Egyptian real-estate analysis remains an available consultant capability, not the agent's primary identity or objective.
+
+The current verified tools, model routes, skill bundles, acceptance results, and
+deliberately deferred integrations are recorded in
+[Capability Baseline](docs/CAPABILITY_BASELINE.md).
+
 ## Phone Access
 
 Open WebUI is an installable Progressive Web App. Open the same ngrok URL on the phone, sign in, then:
@@ -234,7 +242,7 @@ The acceptance suite verifies:
 - four workflows: FastAPI, research, shell automation, and UI build
 - document/OCR dependencies, persistent Python installs, cache ownership, loop guardrails, model routing, and the live gold monitor
 
-Evidence is written to `~/hermes_workspace/shared/outputs/`. See [Deployment Guide](docs/DEPLOYMENT_GUIDE.md) for commands and [Implementation Plan](docs/IMPLEMENTATION_PLAN.md) for the current architecture and acceptance gates.
+Evidence is written to `~/hermes_workspace/shared/outputs/`. See [Deployment Guide](docs/DEPLOYMENT_GUIDE.md) for commands, [Implementation Plan](docs/IMPLEMENTATION_PLAN.md) for the current architecture and acceptance gates, and [Capability Baseline](docs/CAPABILITY_BASELINE.md) for the last live-verified capability inventory.
 
 ## Security
 

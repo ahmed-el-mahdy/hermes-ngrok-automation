@@ -2,9 +2,11 @@
 
 ## Objective
 
-Provide an authenticated Open WebUI portal for Hermes Agent with audited tools, durable workspace evidence, current cloud model routing, a native local GPU model, and a deny-by-default Telegram integration.
+Provide an authenticated Open WebUI portal for a general-purpose Hermes personal assistant and execution agent with audited tools, durable workspace evidence, current cloud model routing, a native local GPU model, and a deny-by-default Telegram integration. Domain specialists, including Egyptian real-estate analysis, are optional capabilities activated only by the user's task; no single domain defines the core agent.
 
 ## Components
+
+The Hermes container is pinned to `nousresearch/hermes-agent:v2026.7.20`. Release changes are tested against the custom voice, Telegram, browser, document, and runtime patches before the pin moves.
 
 ```mermaid
 flowchart LR

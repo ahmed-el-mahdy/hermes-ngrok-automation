@@ -92,6 +92,18 @@ checks["gateway_timeout"] = config.get("agent", {}).get("gateway_timeout") == 30
 checks["runtime_policy"] = "[HERMES_RUNTIME_POLICY]" in str(
     config.get("agent", {}).get("system_prompt") or ""
 )
+checks["general_agent_identity"] = "general-purpose personal assistant" in str(
+    config.get("agent", {}).get("system_prompt") or ""
+)
+checks["verify_on_stop"] = config.get("agent", {}).get("verify_on_stop") == "auto"
+checks["skill_bundles"] = (
+    len(list(Path("/opt/data/skill-bundles").glob("*.yaml"))) >= 5
+)
+try:
+    version = run("hermes", "--version", timeout=10)
+    checks["hermes_release"] = "v0.19.0" in version
+except (OSError, subprocess.SubprocessError):
+    checks["hermes_release"] = False
 
 for raw_path in (
     "/opt/data/cache/uv",

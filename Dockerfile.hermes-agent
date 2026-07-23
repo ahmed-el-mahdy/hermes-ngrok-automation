@@ -1,4 +1,4 @@
-FROM nousresearch/hermes-agent:latest
+FROM nousresearch/hermes-agent:v2026.7.20
 
 ENV VIRTUAL_ENV=/opt/hermes/.venv
 ENV PIP_TARGET=/opt/data/python-packages
@@ -28,6 +28,7 @@ RUN uv pip install \
     "pypdf>=5.4,<7" \
     "pdfplumber>=0.11,<1" \
     "openpyxl>=3.1,<4" \
+    "pytest>=8.3,<10" \
     "pip>=25,<27"
 
 COPY patch-hermes-stt.py /tmp/patch-hermes-stt.py
