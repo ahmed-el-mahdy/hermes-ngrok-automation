@@ -31,6 +31,9 @@ COMMANDS = (
     "hermes-admin",
     "hermes-smoke-test",
     "jq",
+    "libreoffice",
+    "node",
+    "npm",
     "pdfinfo",
     "pdftotext",
     "pip",
@@ -45,6 +48,7 @@ MODULES = (
     "fastapi",
     "httpx",
     "lxml",
+    "markitdown",
     "openpyxl",
     "pdfplumber",
     "pypdf",
@@ -158,6 +162,17 @@ checks["general_agent_identity"] = "general-purpose personal assistant" in str(
 checks["delegation_policy"] = "Delegated workers use" in str(
     config.get("agent", {}).get("system_prompt") or ""
 )
+checks["quota_policy"] = "Use hermes-admin quota" in str(
+    config.get("agent", {}).get("system_prompt") or ""
+)
+checks["artifact_delivery_policy"] = (
+    "A path or MEDIA marker in prose is not proof of delivery"
+    in str(config.get("agent", {}).get("system_prompt") or "")
+)
+if os.getenv("TELEGRAM_BOT_TOKEN"):
+    checks["telegram_home_channel"] = bool(
+        str(config.get("TELEGRAM_HOME_CHANNEL") or "").strip()
+    )
 checks["verify_on_stop"] = config.get("agent", {}).get("verify_on_stop") == "auto"
 checks["skill_bundles"] = (
     len(list(Path("/opt/data/skill-bundles").glob("*.yaml"))) >= 5
@@ -231,11 +246,73 @@ with tempfile.TemporaryDirectory(
 languages = run("tesseract", "--list-langs")
 checks["ocr_arabic"] = "ara" in languages.split()
 checks["hermes_admin"] = "primary=" in run("hermes-admin", "status")
+quota_report = run("hermes-admin", "quota", timeout=30)
+checks["quota_report"] = (
+    "nararouter_free_daily_tokens=7000000" in quota_report
+    and "nararouter_free_requests_per_minute=10" in quota_report
+    and "nararouter_exact_remaining_tokens=dashboard-only" in quota_report
+    and "local_gpu_cloud_quota=none" in quota_report
+)
 checks["pip_wrapper"] = "pip " in run("pip", "--version").lower()
 checks["user_hermes_link"] = Path("/opt/data/.local/bin/hermes").is_symlink()
 checks["gold_monitor_installed"] = Path(
     "/opt/data/home/.hermes/scripts/monitor_gold.py"
 ).is_file()
+try:
+    node_module = run(
+        "node",
+        "-e",
+        "require('pptxgenjs'); console.log('pptxgenjs=ok')",
+        timeout=10,
+    )
+    checks["pptxgenjs"] = "pptxgenjs=ok" in node_module
+except (OSError, subprocess.SubprocessError):
+    checks["pptxgenjs"] = False
+
+with tempfile.TemporaryDirectory(
+    prefix="presentation-smoke-", dir="/opt/data/tmp"
+) as raw_presentation_temp:
+    presentation_temp = Path(raw_presentation_temp)
+    pptx_path = presentation_temp / "runtime-presentation.pptx"
+    builder_path = presentation_temp / "build-presentation.cjs"
+    builder_path.write_text(
+        """const pptxgen = require("pptxgenjs");
+const pptx = new pptxgen();
+pptx.layout = "LAYOUT_WIDE";
+const slide = pptx.addSlide();
+slide.addText("HERMES POWERPOINT OK", {
+  x: 0.8, y: 1.0, w: 11.7, h: 0.8, fontSize: 30
+});
+pptx.writeFile({ fileName: process.argv[2] });
+""",
+        encoding="utf-8",
+    )
+    run("node", str(builder_path), str(pptx_path), timeout=30)
+    checks["presentation_create"] = (
+        pptx_path.is_file() and pptx_path.stat().st_size > 0
+    )
+    extracted = run(
+        "/opt/hermes/.venv/bin/python",
+        "-m",
+        "markitdown",
+        str(pptx_path),
+        timeout=30,
+    )
+    checks["presentation_extract"] = "HERMES POWERPOINT OK" in extracted
+    run(
+        "libreoffice",
+        "--headless",
+        "--convert-to",
+        "pdf",
+        "--outdir",
+        str(presentation_temp),
+        str(pptx_path),
+        timeout=45,
+    )
+    rendered_pdf = presentation_temp / "runtime-presentation.pdf"
+    checks["presentation_render"] = (
+        rendered_pdf.is_file() and rendered_pdf.stat().st_size > 0
+    )
 try:
     with urllib.request.urlopen(
         "http://ollama-bridge:8000/health", timeout=10

@@ -33,6 +33,8 @@ The current release exposes these verified tool families:
 
 Document and data support includes Arabic OCR, PDF extraction, DOCX extraction,
 spreadsheets, structured HTML parsing, and user-writable Python packages.
+PowerPoint support includes PptxGenJS creation, MarkItDown extraction,
+LibreOffice rendering, and native Telegram document delivery.
 
 ## Skill Bundles
 
@@ -59,6 +61,11 @@ remain subject to Hermes security auditing before use.
   local-Qwen-first fallback; local Qwen primary when NaraRouter is unavailable
 - Delegation guard: one child at a time, 20 iterations, ten-minute hard limit
 
+NaraRouter's live free-plan baseline is 7M tokens per day and 10 requests per
+minute. The documented API does not return an exact remaining balance or quota
+headers for the configured key, so Hermes labels that value dashboard-only.
+Local GPU Qwen has no cloud quota and remains the availability fallback.
+
 The local Ollama model is fully loaded in GPU memory and is intended as an
 always-available fallback as well as a direct Open WebUI model. A private bridge
 converts Hermes requests to Ollama's reliable native API, including streaming and
@@ -66,7 +73,9 @@ tool calls, without exposing another host port.
 
 ## Acceptance Evidence
 
-- Hermes runtime smoke test: 63 of 63 checks passed with live web validation
+- Hermes runtime smoke test: 80 of 80 checks passed with live web validation,
+  including the quota report, PowerPoint create/extract/render pipeline, and the
+  default Telegram delivery target
 - Telegram live validation: 3 of 3 checks passed
 - Open WebUI model catalog: 11 of 11 models returned successful responses
 - Independent model routes: 4 of 4 checks passed
