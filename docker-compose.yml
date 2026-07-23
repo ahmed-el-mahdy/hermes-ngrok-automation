@@ -1,110 +1,103 @@
-version: '3.9'
-
 services:
-  # ========================================
-  # 🤖 HERMES AGENT CONTAINER
-  # ========================================
   hermes-agent:
-    image: nousresearch/hermes-agent:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.hermes-agent
+    image: hermes-agent:local
     container_name: hermes-agent
     restart: unless-stopped
-    
-    # Expose Hermes dashboard and API ports
+    command: gateway run
     ports:
-      - "9119:9119"  # Dashboard Web GUI
-      - "8642:8642"  # OpenAI-compatible API endpoint
-    
-    # Load environment variables from .env file
+      - "127.0.0.1:${HERMES_API_PORT:-8642}:${HERMES_API_PORT:-8642}"
     env_file:
       - .env
-    
-    # Environment variables (can override .env values)
     environment:
-      # Hermes Configuration
-      - HERMES_PORT=${HERMES_PORT:-9119}
-      - HERMES_API_PORT=${HERMES_API_PORT:-8642}
-      - HERMES_BIND_ADDRESS=${HERMES_BIND_ADDRESS:-0.0.0.0}
-      
-      # Logging
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      
-      # LLM Provider Keys (configured later via dashboard)
-      # - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      # - GEMINI_API_KEY=${GEMINI_API_KEY}
-      # - OPENAI_API_KEY=${OPENAI_API_KEY}
-      
-      # Networking
-      - DOCKER_NETWORK=${DOCKER_NETWORK:-hermes_net}
-    
-    # Persistent volume for Hermes data, models, configurations
+      API_SERVER_ENABLED: "true"
+      API_SERVER_HOST: "0.0.0.0"
+      API_SERVER_KEY: "${API_SERVER_KEY}"
+      API_SERVER_CORS_ORIGINS: "*"
+      LOG_LEVEL: "${LOG_LEVEL:-INFO}"
+      HF_HOME: "/opt/data/cache/huggingface"
+      XDG_CACHE_HOME: "/opt/data/cache"
+      HERMES_STT_BEAM_SIZE: "${HERMES_STT_BEAM_SIZE:-8}"
+      HERMES_STT_PATIENCE: "${HERMES_STT_PATIENCE:-1.2}"
+      HERMES_STT_VAD_FILTER: "${HERMES_STT_VAD_FILTER:-true}"
+      HERMES_STT_MIN_SILENCE_MS: "${HERMES_STT_MIN_SILENCE_MS:-300}"
+      HERMES_STT_HALLUCINATION_SILENCE: "${HERMES_STT_HALLUCINATION_SILENCE:-2.0}"
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
+      TELEGRAM_ALLOWED_USERS: "${TELEGRAM_ALLOWED_USERS:-}"
+      TELEGRAM_GROUP_ALLOWED_USERS: "${TELEGRAM_GROUP_ALLOWED_USERS:-}"
+      TELEGRAM_GROUP_ALLOWED_CHATS: "${TELEGRAM_GROUP_ALLOWED_CHATS:-}"
+      TELEGRAM_REQUIRE_MENTION: "${TELEGRAM_REQUIRE_MENTION:-true}"
+      TELEGRAM_ALLOW_ALL_USERS: "false"
+      GATEWAY_ALLOW_ALL_USERS: "false"
     volumes:
-      - ./hermes_data:/root/.hermes
-      - ./logs:/var/log/hermes
-    
-    # Connect to shared Docker network
+      - "${HERMES_DATA_DIR:-/home/cyber/.hermes}:/opt/data"
+      - "${HERMES_LOG_DIR:-/home/cyber/hermes-ngrok/logs}:/var/log/hermes"
     networks:
       - hermes_net
-    
-    # Health check (optional)
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9119/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
 
-  # ========================================
-  # 🌐 NGROK TUNNEL CONTAINER
-  # ========================================
+  open-webui:
+    build:
+      context: .
+      dockerfile: Dockerfile.open-webui
+    image: hermes-open-webui:local
+    container_name: hermes-open-webui
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${OPEN_WEBUI_PORT:-3000}:8080"
+    env_file:
+      - .env
+    environment:
+      WEBUI_NAME: "${OPEN_WEBUI_NAME:-Hermes Open WebUI}"
+      WEBUI_SECRET_KEY: "${OPEN_WEBUI_SECRET_KEY}"
+      WEBUI_URL: "${OPEN_WEBUI_PUBLIC_URL:-}"
+      WEBUI_ADMIN_EMAIL: "${OPEN_WEBUI_ADMIN_EMAIL:-admin@hermes.local}"
+      WEBUI_ADMIN_PASSWORD: "${OPEN_WEBUI_ADMIN_PASSWORD}"
+      ENABLE_SIGNUP: "false"
+      ENABLE_OLLAMA_API: "true"
+      OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-http://192.168.1.2:11434}"
+      ENABLE_OPENAI_API: "true"
+      OPENAI_API_BASE_URL: "http://hermes-agent:${HERMES_API_PORT:-8642}/v1"
+      OPENAI_API_KEY: "${API_SERVER_KEY}"
+      DEFAULT_MODELS: "hermes-agent"
+    volumes:
+      - open-webui-data:/app/backend/data
+      - "${HERMES_WORKSPACE_DIR:-/home/cyber/hermes_workspace}:/app/backend/data/hermes_workspace"
+    depends_on:
+      hermes-agent:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/ >/dev/null 2>&1 || wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+    networks:
+      - hermes_net
+
   ngrok-hermes:
     image: ngrok/ngrok:latest
-    container_name: ngrok-hermes
+    container_name: hermes-ngrok
     restart: unless-stopped
-    
-    # Tunnel Hermes dashboard (port 9119) to the internet
-    # Exposes Ngrok Management API on port 4040 for URL polling
-    command: >
-      http hermes-agent:9119
-      --log=stdout
-      --region=eu
-    
+    command:
+      - http
+      - open-webui:8080
+      - --log=stdout
+      - --region=eu
     environment:
-      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
-    
-    # Expose Ngrok Management API for URL watcher script
+      NGROK_AUTHTOKEN: "${NGROK_AUTHTOKEN}"
     ports:
-      - "4040:4040"
-    
-    # Depends on Hermes being up first
+      - "127.0.0.1:4040:4040"
     depends_on:
-      - hermes-agent
-    
-    # Connect to shared Docker network
+      open-webui:
+        condition: service_healthy
     networks:
       - hermes_net
-    
-    # Health check
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4040/api/tunnels"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
 
-# ========================================
-# 🔗 SHARED DOCKER NETWORK
-# ========================================
-# All containers communicate via this bridge network
+volumes:
+  open-webui-data:
+
 networks:
   hermes_net:
     driver: bridge
     name: ${DOCKER_NETWORK:-hermes_net}
-
-# ========================================
-# 💾 VOLUMES
-# ========================================
-# These are referenced by the containers above
-# Persistent storage for Hermes data
-volumes:
-  hermes_data:
-    driver: local

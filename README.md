@@ -1,717 +1,257 @@
-# 🚀 Hermes Agent Automation with Ngrok Tunneling on Ubuntu Server
+# Hermes Open WebUI Automation
 
-> **Deploy Hermes Agent on your Ubuntu VM and make it accessible from anywhere on the internet using ngrok**
+Deploy Hermes Agent behind Open WebUI and publish only the Open WebUI login through ngrok. The native Hermes dashboard is disabled; the Hermes API remains bound to the VM loopback interface.
 
-## 📘 Quick Overview
+The custom dashboard image is pinned to Open WebUI `v0.10.2` and adds Node.js for the canonical Code Executor tool. The custom Hermes image is pinned to the tested Hermes release `v2026.7.20` and adds local voice, document extraction, OCR, web parsing, and persistent Python package support. Release upgrades are deliberate and must pass the voice, Telegram, browser, document, and runtime checks before the pin moves.
 
-This project automates the deployment of **Hermes Agent** (NousResearch's LLM orchestration platform) on an Ubuntu Minimal Server with **ngrok** tunneling, following the proven pattern from [n8n-ngrok-automation](https://github.com/ahmed-el-mahdy/n8n-ngrok-automation).
+## Architecture
 
-**What you get:**
-- 🤖 **Hermes Agent** web dashboard accessible globally via HTTPS
-- 🔐 **ngrok Basic Auth** protection (auto-generated password)
-- 🔄 **URL Watcher** systemd service (tracks ngrok URL changes automatically)
-- 💾 **Persistent data** across container restarts and updates
-- ⚡ **Fully automated** deployment (one command, 5 minutes)
-- 🧠 **LLM-ready** for OpenRouter, Gemini, or any OpenAI-compatible API
-
----
-
-## ⚡ 5-Minute Quick Start
-
-### Step 1: Prerequisites Check
-
-**On your Ubuntu machine:**
-
-```bash
-# Update system
-sudo apt update && sudo apt upgrade -y
-
-# Check you have internet and ~2GB disk space
-df -h
-free -h
-
-# Verify basic tools exist
-which curl wget git
+```text
+Browser
+  -> ngrok HTTPS endpoint
+  -> Open WebUI :8080
+     -> Hermes OpenAI-compatible API :8642
+        -> OpenRouter free primary/fallback, then Gemini fallback
+     -> Windows Ollama native API :11434
+        -> qwen3-4b-gpu:latest
 ```
 
-### Step 2: Get ngrok Auth Token
+The deployment uses three containers on one private Docker bridge network:
 
-1. **Create free ngrok account:** https://ngrok.com/signup
-2. **Get your auth token:** https://dashboard.ngrok.com/get-started/your-authtoken
-3. **Copy the token** (looks like: `2bPxx_1Bq1234567890abcdefghijklmnopqrst`)
+| Container | Purpose | Host exposure |
+| --- | --- | --- |
+| `hermes-open-webui` | Authenticated chat dashboard | `127.0.0.1:3000` |
+| `hermes-agent` | Agent gateway and model router | `127.0.0.1:8642` |
+| `hermes-ngrok` | HTTPS tunnel to Open WebUI | `127.0.0.1:4040` management API |
 
-### Step 3: Deploy (One Command)
+ngrok Basic Auth and OAuth are intentionally absent. Users authenticate once with the Open WebUI email/password form.
+
+## Requirements
+
+- Ubuntu VM with Docker Engine and Docker Compose v2
+- 8 GB RAM recommended
+- 20 GB free disk space recommended
+- ngrok account and auth token
+- At least one valid LLM provider key
+- Optional Ollama endpoint reachable from the VM
+
+## Deploy
 
 ```bash
-# Download the deployment script
-wget https://raw.githubusercontent.com/ahmed-el-mahdy/hermes-ngrok-automation/main/hermes-ngrok-deploy.sh
-
-# Make it executable
+git clone https://github.com/ahmed-el-mahdy/hermes-ngrok-automation.git
+cd hermes-ngrok-automation
 chmod +x hermes-ngrok-deploy.sh
-
-# Run the deployment
 ./hermes-ngrok-deploy.sh
 ```
 
-**When prompted:**
-- Paste your ngrok auth token
-- Press ENTER
-- Wait 3-5 minutes (script handles everything automatically)
+The script preserves an existing `~/hermes-ngrok/.env`, generates missing local secrets, builds the Node-enabled Open WebUI image, starts the stack, and prints the current ngrok URL. Secrets are stored only in `~/hermes-ngrok/.env` with mode `0600`.
 
-### Step 4: Access Hermes Dashboard
-
-When deployment finishes, you'll see:
-
-```
-╔══════════════════════════════════════════════════════════╗
-║          HERMES AGENT — DEPLOYMENT COMPLETE              ║
-╠══════════════════════════════════════════════════════════╣
-║  🌐  URL:       https://xyz123.ngrok-free.dev           ║
-║  🔑  Username:  hermes                                   ║
-║  🔑  Password:  a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6        ║
-║                                                          ║
-║  Credentials saved to: ~/hermes-ngrok/credentials.txt   ║
-╚══════════════════════════════════════════════════════════╝
-```
-
-1. **Open the URL** in your browser (from anywhere in the world!)
-2. **Enter credentials** when prompted (ngrok basic auth popup)
-3. **Hermes Dashboard appears** ✅
-
----
-
-## 📋 What Gets Deployed
-
-### Deployment Locations
-
-```
-Ubuntu Home Directory (~)
-├── hermes-ngrok/                      # Project root
-│   ├── .env                           # Configuration (chmod 600, secrets)
-│   ├── docker-compose.yml             # Container orchestration
-│   ├── current-url.txt                # Current ngrok public URL
-│   ├── credentials.txt                # Dashboard credentials
-│   ├── logs/                          # Application logs
-│   │   └── url-watcher.log           # URL change history
-│   └── scripts/                       # Helper scripts
-│       ├── start.sh                  # Start all services
-│       ├── stop.sh                   # Stop all services
-│       ├── restart.sh                # Restart (data preserved)
-│       ├── status.sh                 # Check service status
-│       ├── get-url.sh                # Print current public URL
-│       ├── logs.sh                   # View container logs
-│       ├── update.sh                 # Update Hermes image
-│       ├── setup-wizard.sh           # Interactive setup
-│       └── url-watcher.sh            # URL tracking service
-│
-└── .hermes/                           # Persistent Hermes data
-    ├── config.yaml                   # Hermes configuration
-    ├── models/                       # Downloaded models
-    ├── memory/                       # Chat history & sessions
-    └── (other data)
-```
-
-### Docker Containers
-
-| Container | Port | Role |
-|-----------|------|------|
-| **hermes-agent** | 9119 (dashboard), 8642 (API) | LLM orchestration engine |
-| **hermes-ngrok** | 4040 (mgmt API) | HTTPS tunnel to internet |
-
-### Systemd Service
-
-- **Service Name:** `hermes-url-watcher`
-- **Purpose:** Polls ngrok API, detects URL changes, logs them
-- **Auto-starts:** On VM boot
-- **Status:** `sudo systemctl status hermes-url-watcher`
-
----
-
-## 🔧 What the Deployment Script Does
-
-The `hermes-ngrok-deploy.sh` script automates 10 steps:
-
-### ✅ Step 1: Check Prerequisites
-- Detects OS (Ubuntu 20.04 LTS+)
-- Checks for Docker, Python3, curl, jq, netcat, openssl
-- Installs missing dependencies via apt
-
-### ✅ Step 2: Install Docker (if needed)
-- Installs Docker Engine + Compose v2
-- Adds current user to `docker` group
-- Starts Docker daemon
-- (May require running `newgrp docker` after)
-
-### ✅ Step 3: Collect Configuration
-- **Prompts you for:** ngrok Auth Token
-- **Auto-generates:** Dashboard password (24-char hex)
-- **Auto-generates:** API server key (48-char hex)
-- **Saves to:** `credentials.txt` (chmod 600)
-
-### ✅ Step 4: Create Directory Structure
-```
-~/hermes-ngrok/          # Project root
-~/.hermes/               # Persistent data (chmod 700)
-~/hermes-ngrok/scripts/  # Helper scripts
-~/hermes-ngrok/logs/     # Log files
-```
-
-### ✅ Step 5: Generate Configuration Files
-- **`.env`** — Environment variables (chmod 600, not in Git)
-- **`docker-compose.yml`** — Two-container setup
-- **`.gitignore`** — Prevents secret commits
-- **`credentials.txt`** — Dashboard login info (chmod 600)
-
-### ✅ Step 6: Generate Helper Scripts
-Creates executable scripts in `~/hermes-ngrok/scripts/`:
-- `start.sh`, `stop.sh`, `restart.sh`
-- `status.sh`, `get-url.sh`, `logs.sh`
-- `update.sh`, `setup-wizard.sh`
-- `url-watcher.sh`
-
-### ✅ Step 7: Create URL Watcher Script
-- Polls `http://localhost:4040/api/tunnels` every 30 seconds
-- Detects URL changes (free ngrok changes on restart)
-- Logs changes with timestamps
-- Updates `current-url.txt`
-
-### ✅ Step 8: Install systemd Service
-- Registers `hermes-url-watcher.service`
-- Auto-starts on VM boot
-- Restarts on failure
-- Logs to systemd journal
-
-### ✅ Step 9: Pull Docker Images
-- Downloads `nousresearch/hermes-agent:latest` (~1-2 GB)
-- Downloads `ngrok/ngrok:latest` (~50 MB)
-- (Takes 2-5 minutes depending on internet)
-
-### ✅ Step 10: Start Services
-- Runs `docker compose up -d`
-- Waits for containers to respond
-- Starts URL watcher service
-- Displays final access information
-
----
-
-## 🎮 Daily Operations
-
-### Get Current Public URL
-
-**Free ngrok plan = random URL on each restart**
+Useful commands:
 
 ```bash
-# Fastest way
-bash ~/hermes-ngrok/scripts/get-url.sh
-
-# Or read the file directly
-cat ~/hermes-ngrok/current-url.txt
-
-# Or check the logs
-tail ~/hermes-ngrok/logs/url-watcher.log
-```
-
-### Check Service Status
-
-```bash
-bash ~/hermes-ngrok/scripts/status.sh
-```
-
-Shows:
-- Container status (running/stopped)
-- Current ngrok URL
-- URL watcher service status
-- Last 25 lines of Hermes logs
-
-### Stop All Services (Data Preserved)
-
-```bash
-bash ~/hermes-ngrok/scripts/stop.sh
-```
-
-Your Hermes data remains in `~/.hermes/`. Start again anytime with `start.sh`.
-
-### Restart Services
-
-```bash
-bash ~/hermes-ngrok/scripts/restart.sh
-```
-
-Useful after changing LLM API keys in `.env`.
-
-### View Real-Time Logs
-
-```bash
-# All containers
+./hermes-ngrok-deploy.sh --status
+./hermes-ngrok-deploy.sh --url
+./hermes-ngrok-deploy.sh --restart
 docker compose -f ~/hermes-ngrok/docker-compose.yml logs -f
-
-# Just Hermes
-docker logs -f hermes-agent
-
-# Just ngrok
-docker logs -f hermes-ngrok
-
-# URL watcher service
-sudo journalctl -u hermes-url-watcher.service -f
 ```
 
----
+## Persistent Data
 
-## 🧠 Configure LLM Provider
+| Host path or volume | Contents |
+| --- | --- |
+| `~/.hermes` | Hermes configuration, memory, sessions, and provider routing |
+| `~/hermes_workspace` | Tool, specialist, workflow, and acceptance artifacts |
+| `~/hermes-ngrok/logs` | Hermes logs |
+| `open-webui-data` | Open WebUI users, chats, models, tools, and prompts |
+| `~/hermes-backups` | Timestamped configuration and database backups |
 
-### Option A: Via Web Portal (Recommended)
+Container recreation does not remove these locations. Do not use `docker compose down -v` unless Open WebUI data should be deleted.
 
-1. **Get Free API Key:**
-   - **OpenRouter:** https://openrouter.ai/keys (recommended, free credits)
-   - **Gemini:** https://aistudio.google.com/app/apikey (free tier)
-   - **OpenAI:** https://platform.openai.com/api-keys (paid)
+## Model Routing
 
-2. **Access Hermes Dashboard:**
-   - Open the ngrok URL from deployment output
-   - Log in: `hermes` / (password from credentials.txt)
+The validated automatic cloud routing policy inside Hermes is:
 
-3. **Add API Key:**
-   - Navigate to **Settings** → **API Keys**
-   - Paste your API key
-   - Save
+1. `nvidia/nemotron-3-super-120b-a12b:free` through OpenRouter
+2. `openai/gpt-oss-20b:free`
+3. `openrouter/free`
+4. `gemini-2.5-flash`
 
-4. **Test:**
-   - Select a model from dropdown
-   - Type a message
-   - Submit
+The explicit OpenRouter models and automatic free router were live-tested with tool calling. Nemotron is first because it had the lowest direct response latency in the live checks. Gemini remains a final fallback because exhausted Google quota must not block ordinary sessions. The local model is published separately as `hermes-local-gpu`. Open WebUI calls `qwen3-4b-gpu:latest` through Ollama's native `/api/chat` endpoint, which preserves Ollama reasoning behavior and avoids the empty-content responses seen through the OpenAI compatibility endpoint. Provider credentials are runtime secrets and must never be committed.
 
-### Option B: Via Environment File
+### Persistent Windows Ollama
 
-1. **Edit `.env`:**
-   ```bash
-   nano ~/hermes-ngrok/.env
-   ```
+Install the Windows boot task from an elevated PowerShell session:
 
-2. **Add API key:**
-   ```bash
-   # Find this section and uncomment:
-   OPENROUTER_API_KEY=sk-or-v1-xxxxx
-   ```
-
-3. **Restart:**
-   ```bash
-   bash ~/hermes-ngrok/scripts/restart.sh
-   ```
-
-4. **Verify:** Refresh browser, test a prompt
-
----
-
-## 📂 File Structure Explained
-
-| File/Directory | Purpose | Committed to Git? |
-|---|---|---|
-| `.env` | Secrets (ngrok token, API keys) | ❌ No (chmod 600) |
-| `credentials.txt` | Dashboard login info | ❌ No (chmod 600) |
-| `.env.example` | Template for `.env` | ✅ Yes |
-| `docker-compose.yml` | Container config | ✅ Yes |
-| `hermes-ngrok-deploy.sh` | Main deployment script | ✅ Yes |
-| `scripts/` | Helper bash scripts | ✅ Yes |
-| `docs/` | Implementation, deployment, troubleshooting | ✅ Yes |
-| `.gitignore` | Prevents secret commits | ✅ Yes |
-| `README.md` | This file | ✅ Yes |
-| `~/.hermes/` | **All Hermes data** (config, models, memory) | ❌ No (local) |
-
----
-
-## 🔐 Security Model
-
-### Layers of Protection
-
-```
-Internet User
-    ↓
-ngrok HTTPS/TLS encryption
-    ↓
-ngrok Basic Auth Challenge (username + 24-char password)
-    ↓
-Hermes Dashboard (running internally in insecure mode)
-    ↓
-Access to LLM features, chat history, configurations
+```powershell
+powershell -ExecutionPolicy Bypass -File .\windows\Install-HermesOllamaTask.ps1
 ```
 
-### Why This is Secure
+The task runs Ollama as `SYSTEM` at startup, preloads `qwen3-4b-gpu:latest`, requires the model's full size to be resident in VRAM, keeps it loaded, restarts after failures, and creates an inbound firewall rule restricted to the Hermes VM address `192.168.1.5`.
 
-1. **External Gate:** ngrok's basic auth requires username + password
-2. **Transport Security:** HTTPS/TLS encryption (ngrok terminates)
-3. **Strong Credentials:** 24-character hex password (96 bits entropy)
-4. **Local Data:** All Hermes data stays on your Ubuntu VM
-5. **Secrets Not in Git:** `.env` and `credentials.txt` ignored
+Run a controlled restart test from an elevated PowerShell session:
 
-### What's NOT Protected Yet (Optional Additions)
+```powershell
+powershell -ExecutionPolicy Bypass -File .\windows\Test-HermesOllamaRecovery.ps1
+```
 
-- No rate limiting on login attempts (ngrok handles this)
-- No 2FA (can add later via Hermes OAuth)
-- No reverse proxy (Nginx optional)
-- Public ngrok URL can be enumerated (free tier limitation)
+### Persistent VMware Hermes VM
 
-**Recommendation:** This setup is secure for personal/internal use. For production internet-facing deployments:
-- Upgrade to paid ngrok (static domain, IP allowlist)
-- Add Hermes OAuth
-- Add reverse proxy (Nginx) with rate limiting
+Install the interactive logon task from PowerShell:
 
----
+```powershell
+powershell -ExecutionPolicy Bypass -File .\windows\Install-HermesVMTask.ps1
+```
 
-## 🆘 Troubleshooting
+The `Hermes VM Autostart` task opens VMware Workstation, starts `Ubuntu Mini Hermes` only when it is not already running, waits for SSH at `192.168.1.5`, and verifies the public Hermes portal. Its launcher is copied to `%LOCALAPPDATA%\HermesVMStartup`, and startup results are written to `startup.log` there. Docker and all three Hermes containers are configured to start automatically inside Ubuntu, so no Ubuntu password is stored in the Windows task.
 
-### "Port 9119 is already in use"
+After Ollama is reachable, configure the two supported portal connections and publish the model catalog:
 
 ```bash
-# Find what's using it
-sudo lsof -i :9119
-
-# Kill the process
-sudo kill -9 <PID>
-
-# Or stop & restart
-bash ~/hermes-ngrok/scripts/stop.sh
-sleep 3
-bash ~/hermes-ngrok/scripts/start.sh
+OLLAMA_BASE_URL='http://192.168.1.2:11434' bash configure-openwebui-providers.sh
+PORTAL_EMAIL='admin@hermes.local' PORTAL_PASSWORD='...' bash deploy-model-catalog.sh
 ```
 
-### "Docker daemon is not running"
+Apply the routing policy and runtime hardening without putting keys in the repository:
 
 ```bash
-sudo systemctl start docker
-sudo systemctl status docker
+bash configure-hermes-runtime.sh
 ```
 
-### "ngrok tunnel not establishing"
+Published Open WebUI profiles:
+
+- `hermes`
+- `orchestrator`, `searcher`, `scraper`, `builder`, `coder`
+- `reviewer`, `designer`, `consultant`, `coordinator`
+- `hermes-local-gpu` through the native Ollama API
+
+Inspect or switch an approved Hermes route without printing credentials:
 
 ```bash
-# Check ngrok logs
-docker logs hermes-ngrok | tail -20
-
-# Verify auth token is correct
-grep NGROK_AUTHTOKEN ~/hermes-ngrok/.env
+docker exec hermes-agent hermes-admin status
+docker exec hermes-agent hermes-admin models
+docker exec hermes-agent hermes-admin use openrouter-gpt
 ```
 
-### "Can't log in to dashboard"
+Changes selected with `hermes-admin use` apply to new sessions.
+
+## Autonomous Runtime
+
+`configure-hermes-runtime.sh` fixes persistent cache ownership and installs a shell profile that exposes `hermes`, `hermes-admin`, `pip`, and `uv` to agent terminal sessions. Python packages installed with `pip` persist under `/opt/data/python-packages`.
+
+The image includes:
+
+- PDF text extraction with Poppler, PyMuPDF, pypdf, and pdfplumber
+- DOCX and XLSX handling with python-docx and openpyxl
+- Arabic and English OCR with Tesseract
+- HTML parsing with Beautiful Soup and lxml
+- `jq`, `file`, and the Hermes CLI on `PATH`
+
+Runtime loop guardrails stop repeated failures, terminal and delegated work have bounded timeouts, and cron runs only one job at a time. OpenRouter requests stop after 60 seconds, silent streams stop after 45 seconds, and a complete gateway request stops after five minutes. The agent policy tells Hermes to use the installed key-free DDGS `web_search` backend and `browser_snapshot` instead of looking for a nonexistent `web-search` skill.
+
+Run the bounded readiness check instead of the upstream Hermes test suite:
 
 ```bash
-# Get credentials
-cat ~/hermes-ngrok/credentials.txt
-
-# Or re-run get-url script
-bash ~/hermes-ngrok/scripts/get-url.sh
-
-# Username is always: hermes
+docker exec -u 10000 hermes-agent hermes-smoke-test
 ```
 
-### "Dashboard is slow / API hanging"
+The terminal starts in writable `/opt/data/home`; pytest cache and temporary files stay under `/opt/data/cache/pytest` and `/opt/data/tmp`. `/opt/hermes` remains immutable. Full source and gateway integration suites are not routine health checks and should only be run as targeted, explicitly requested tests.
+
+Gateway progress such as `iteration 1/20` means the agent completed its first tool/reasoning loop out of a maximum of 20; it is not a test counter. The smoke report exposes explicit `passed_count` and `check_count` fields. Telegram uses a recent secret-free live-health attestation when terminal security removes bot credentials from the child process.
+
+### Gold Monitor
+
+The daily cron script is installed at `~/.hermes/scripts/monitor_gold.py`. It reads live XAU/USD and USD/EGP JSON feeds, calculates an indicative 21K EGP price, stores an atomic history under `~/.hermes/state`, and alerts only when the configured percentage is crossed. The result excludes Egyptian dealer margin and workmanship, so it must be confirmed locally before a purchase.
+
+## Canonical Tools
+
+Seven audited tools are maintained under `openwebui-tools/`:
+
+- File System Manager
+- Code Executor
+- Shell Command Runner
+- Git Operations
+- Web Research
+- Hermes Persistent Memory
+- Agent Evaluator
+
+Path traversal, shell operators, and private-network URL requests are rejected. Tool deployment and validation scripts create timestamped Open WebUI database backups before changes.
+
+## Dashboard Prompts
+
+The deployment library contains ten reusable prompts for coding, research, project building, review, orchestration, continuation, durable memory, recommendations, scraping, and debugging. They are installed through Open WebUI's prompt API, not direct database edits.
+
+## Agent Identity
+
+HERMES is a general-purpose personal assistant and execution agent for research, software, automation, documents, planning, learning, communication, and analysis. Specialist knowledge is loaded only for the task that needs it. Egyptian real-estate analysis remains an available consultant capability, not the agent's primary identity or objective.
+
+The current verified tools, model routes, skill bundles, acceptance results, and
+deliberately deferred integrations are recorded in
+[Capability Baseline](docs/CAPABILITY_BASELINE.md).
+
+## Phone Access
+
+Open WebUI is an installable Progressive Web App. Open the same ngrok URL on the phone, sign in, then:
+
+- Android Chrome: menu, then **Install app** or **Add to Home screen**
+- iPhone/iPad Safari: **Share**, then **Add to Home Screen**
+
+Use the installed Open WebUI app for the full dashboard, long chats, files, and model selection. Use Telegram for quick requests, voice, photos, scheduled alerts, and notifications. The two interfaces complement each other; Telegram does not need to replace the portal.
+
+Official references: [Open WebUI getting started](https://docs.openwebui.com/getting-started/) and [phone/PWA guide](https://docs.openwebui.com/ecosystem/computer/phone-and-remote/phone-app/).
+
+## Telegram
+
+Telegram is disabled until `TELEGRAM_BOT_TOKEN` is set. Enable it only with an explicit numeric user allowlist:
+
+```dotenv
+TELEGRAM_BOT_TOKEN=replace_with_botfather_token
+TELEGRAM_ALLOWED_USERS=123456789
+TELEGRAM_GROUP_ALLOWED_USERS=123456789
+TELEGRAM_GROUP_ALLOWED_CHATS=-1001234567890
+TELEGRAM_REQUIRE_MENTION=true
+```
+
+Compose forces `TELEGRAM_ALLOW_ALL_USERS=false` and `GATEWAY_ALLOW_ALL_USERS=false`. Restart `hermes-agent` after adding the token and allowlist.
+
+### Telegram Images And Voice
+
+Enable the low-cost media profile after Telegram activation:
 
 ```bash
-# Check resources
-free -h  # RAM
-df -h    # Disk
-top      # CPU
-
-# Check if API key is configured
-grep -E '^(OPENROUTER|GOOGLE|OPENAI)' ~/hermes-ngrok/.env | head -3
+bash configure-telegram-media.sh
 ```
 
-**For more help:** See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) (when created)
+This profile uses local `faster-whisper large-v3-turbo` with forced Arabic decoding, Egyptian Arabic context, beam search, and silence filtering for incoming voice messages. Free Edge TTS with `ar-EG-ShakirNeural` handles outgoing Arabic speech. The Whisper model is downloaded during setup and cached under persistent Hermes data, so container recreation does not download it again. Ordinary replies stay text-only; Hermes generates an OGG/Opus Telegram voice note when the user explicitly asks for a voice reply. Telegram photos, image documents, and static stickers are cached and passed to the configured vision-capable Gemini model. Hermes answers this user in clear Egyptian Arabic by default.
 
----
-
-## 📚 Documentation
-
-1. **[IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)**
-   - Architecture overview
-   - Security model
-   - Component design
-   - LLM integration strategy
-
-2. **[DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md)**
-   - Step-by-step walkthrough
-   - Screenshots & examples
-   - Configuration methods
-   - Daily operations
-
-3. **[.env.example](.env.example)**
-   - Complete configuration template
-   - All available options
-   - Comments explaining each setting
-
----
-
-## 🎯 Key Commands Reference
+Override the defaults when needed:
 
 ```bash
-# ═══════════════════════════════════════════════════════════
-# DEPLOYMENT & SETUP
-# ═══════════════════════════════════════════════════════════
-wget https://raw.githubusercontent.com/ahmed-el-mahdy/hermes-ngrok-automation/main/hermes-ngrok-deploy.sh
-chmod +x hermes-ngrok-deploy.sh
-./hermes-ngrok-deploy.sh
-
-# ═══════════════════════════════════════════════════════════
-# SERVICE CONTROL
-# ═══════════════════════════════════════════════════════════
-bash ~/hermes-ngrok/scripts/start.sh      # Start all services
-bash ~/hermes-ngrok/scripts/stop.sh       # Stop all services
-bash ~/hermes-ngrok/scripts/restart.sh    # Restart (data preserved)
-bash ~/hermes-ngrok/scripts/status.sh     # Full status report
-
-# ═══════════════════════════════════════════════════════════
-# ACCESS & CONNECTIVITY
-# ═══════════════════════════════════════════════════════════
-bash ~/hermes-ngrok/scripts/get-url.sh         # Get current public URL
-cat ~/hermes-ngrok/current-url.txt             # Read URL from file
-cat ~/hermes-ngrok/credentials.txt             # View login credentials
-
-# ═══════════════════════════════════════════════════════════
-# MONITORING & DEBUGGING
-# ═══════════════════════════════════════════════════════════
-bash ~/hermes-ngrok/scripts/logs.sh hermes     # View Hermes logs
-bash ~/hermes-ngrok/scripts/logs.sh ngrok      # View ngrok logs
-docker compose -f ~/hermes-ngrok/docker-compose.yml ps   # Container status
-sudo journalctl -u hermes-url-watcher.service -f         # URL watcher logs
-
-# ═══════════════════════════════════════════════════════════
-# MAINTENANCE & UPDATES
-# ═══════════════════════════════════════════════════════════
-bash ~/hermes-ngrok/scripts/update.sh                     # Update Hermes image
-bash ~/hermes-ngrok/scripts/setup-wizard.sh               # Interactive setup
-cd ~/hermes-ngrok && docker compose ps                    # Raw docker status
-
-# ═══════════════════════════════════════════════════════════
-# BACKUP & RESTORE
-# ═══════════════════════════════════════════════════════════
-tar czf ~/hermes-backup-$(date +%s).tar.gz ~/.hermes/     # Backup data
-cd ~ && tar xzf hermes-backup-XXXX.tar.gz                # Restore data
-bash ~/hermes-ngrok/scripts/restart.sh                    # Restart after restore
-
-# ═══════════════════════════════════════════════════════════
-# UNINSTALL (preserves ~/.hermes data)
-# ═══════════════════════════════════════════════════════════
-./hermes-ngrok-deploy.sh --uninstall
+STT_MODEL=small STT_LANGUAGE=ar TTS_VOICE=ar-EG-SalmaNeural \
+  bash configure-telegram-media.sh
 ```
 
----
+## Validation
 
-## 🌐 Accessing from Different Devices
+The acceptance suite verifies:
 
-**Hermes is accessible from:**
-- ✅ Your Ubuntu VM (localhost:9119)
-- ✅ Same network as VM (VM's IP:9119)
-- ✅ **Anywhere on the internet** (ngrok public URL)
-- ✅ Mobile phones, tablets, other computers
-- ✅ Different countries/regions
+- all seven tools
+- all 11 model profiles
+- all nine specialist artifacts
+- all ten prompt patterns
+- the 30-skill matrix
+- four workflows: FastAPI, research, shell automation, and UI build
+- document/OCR dependencies, persistent Python installs, cache ownership, loop guardrails, model routing, and the live gold monitor
 
-**Just use the ngrok URL:**
-```
-https://your-random-url.ngrok-free.dev
-```
+Evidence is written to `~/hermes_workspace/shared/outputs/`. See [Deployment Guide](docs/DEPLOYMENT_GUIDE.md) for commands, [Implementation Plan](docs/IMPLEMENTATION_PLAN.md) for the current architecture and acceptance gates, and [Capability Baseline](docs/CAPABILITY_BASELINE.md) for the last live-verified capability inventory.
 
-No port forwarding, no firewall configuration, no static IP needed!
+## Security
 
----
+- Only Open WebUI is exposed through ngrok.
+- Local service ports bind to `127.0.0.1`.
+- Open WebUI signup is disabled.
+- ngrok browser-level auth is disabled to prevent login loops.
+- Telegram and the global gateway remain deny-by-default.
+- Provider keys and portal credentials stay in `.env` or persistent Hermes configuration.
+- Rotate any token that has been pasted into chat or logs.
 
-## 🔄 Data Persistence & Disaster Recovery
-
-### Your Data is Safe
-
-```bash
-# Hermes data is stored here (survives everything):
-~/.hermes/
-
-# This directory is:
-✅ Mounted as Docker volume
-✅ Survives container restarts
-✅ Survives docker compose down/up
-✅ Survives image updates
-✅ Survives VM reboots
-❌ Only deleted if you manually delete ~/.hermes/
-```
-
-### Backup Your Data
-
-```bash
-# Create timestamped backup
-tar czf ~/hermes-backup-$(date +%Y%m%d-%H%M%S).tar.gz ~/.hermes/
-
-# Restore from backup
-cd ~ && tar xzf hermes-backup-20260602-150000.tar.gz
-bash ~/hermes-ngrok/scripts/restart.sh
-```
-
-### Uninstall (Keep Data)
-
-```bash
-# Remove containers & project files, but keep ~/.hermes/
-./hermes-ngrok-deploy.sh --uninstall
-
-# Your data is preserved! Can reinstall anytime
-```
-
----
-
-## 🏗️ Architecture Overview
-
-```
-┌────────────────────────────────────────────────────┐
-│           Ubuntu Minimal Server (VM)               │
-│                    NAT Mode                         │
-│                                                    │
-│  ┌──────────────────────────────────────────────┐ │
-│  │          Docker Network: hermes-net          │ │
-│  │                                              │ │
-│  │  ┌──────────────────┐  ┌────────────────┐  │ │
-│  │  │ hermes-agent     │  │  hermes-ngrok  │  │ │
-│  │  │ (Port 9119)      │◄─┤  (ngrok tunnel)│  │ │
-│  │  │ (Port 8642 API)  │  │  (Port 4040)   │  │ │
-│  │  │                  │  │                │  │ │
-│  │  │ Dashboard +      │  │ HTTPS to       │  │ │
-│  │  │ LLM Engine       │  │ Internet       │  │ │
-│  │  │                  │  │                │  │ │
-│  │  │ Data: ~/.hermes/ │  │                │  │ │
-│  │  └──────────────────┘  └────────────────┘  │ │
-│  │                                              │ │
-│  │  URL Watcher Service (systemd)              │ │
-│  │  └─ Polls ngrok API every 30s               │ │
-│  │  └─ Detects & logs URL changes              │ │
-│  └──────────────────────────────────────────────┘ │
-│                                                    │
-│  ↕ (outbound HTTPS only via ngrok)               │
-└────────────────────────────────────────────────────┘
-        ↓
-┌────────────────────────────────────────────────────┐
-│            Internet (ngrok Infrastructure)         │
-│                                                    │
-│  ngrok Basic Auth Gate                           │
-│  ├─ Username: hermes                            │
-│  └─ Password: (24-char auto-generated)         │
-│                    ↓                              │
-│  ngrok HTTPS Tunnel                             │
-│  └─ https://your-random-url.ngrok-free.dev     │
-│                    ↓                              │
-│  Public Users Worldwide                          │
-└────────────────────────────────────────────────────┘
-```
-
----
-
-## 🎓 Learning Resources
-
-- **Hermes Agent:** https://github.com/NousResearch/Hermes
-- **ngrok Documentation:** https://ngrok.com/docs/
-- **Docker Compose:** https://docs.docker.com/compose/
-- **OpenRouter API:** https://openrouter.ai/docs
-- **Google Gemini API:** https://ai.google.dev/
-
----
-
-## ✅ Deployment Checklist
-
-Before you start:
-
-- [ ] Ubuntu 20.04 LTS or newer
-- [ ] ~2 GB free disk space
-- [ ] Internet connection
-- [ ] Sudo access
-- [ ] ngrok account created (free at https://ngrok.com/signup)
-- [ ] ngrok auth token copied
-
-After deployment:
-
-- [ ] Public URL accessible from browser
-- [ ] Can log in with hermes / password
-- [ ] Hermes dashboard loads
-- [ ] LLM provider API key obtained
-- [ ] API key added via portal or .env
-- [ ] Chat message sends successfully
-- [ ] ~/hermes-ngrok/ directory exists with scripts
-- [ ] ~/.hermes/ directory exists with Hermes data
-- [ ] systemd service is running: `sudo systemctl status hermes-url-watcher`
-
----
-
-## 🚀 Next Steps
-
-1. **Deploy:** Run the one-command deployment script
-2. **Access:** Open the ngrok URL in your browser
-3. **Authenticate:** Use username/password from credentials.txt
-4. **Configure LLM:** Get a free API key (OpenRouter or Gemini)
-5. **Test:** Send a chat message through Hermes
-6. **Explore:** Check settings, configure models, test API endpoints
-
----
-
-## 📞 Support & Issues
-
-If something doesn't work:
-
-1. **Check the logs:**
-   ```bash
-   bash ~/hermes-ngrok/scripts/status.sh
-   docker logs hermes-agent
-   docker logs hermes-ngrok
-   ```
-
-2. **Verify configuration:**
-   ```bash
-   cat ~/hermes-ngrok/.env
-   cat ~/hermes-ngrok/credentials.txt
-   ```
-
-3. **Test connectivity:**
-   ```bash
-   bash ~/hermes-ngrok/scripts/get-url.sh
-   curl -s http://localhost:4040/api/tunnels | jq
-   ```
-
-4. **Open a GitHub Issue:**
-   - Include error messages from logs
-   - Include OS and Docker versions
-   - Include output of `df -h` and `free -h`
-
----
-
-## 📊 Specifications
-
-| Item | Specification |
-|------|---|
-| **OS Support** | Ubuntu 20.04 LTS+ (minimal install OK) |
-| **RAM Required** | 1 GB minimum (2 GB recommended) |
-| **Disk Required** | 2 GB free (+ space for Hermes models) |
-| **Deployment Time** | 3-5 minutes (depending on internet) |
-| **Hermes Dashboard** | Port 9119 (HTTP locally, HTTPS via ngrok) |
-| **Hermes API** | Port 8642 (OpenAI-compatible) |
-| **ngrok URL Type** | HTTPS encrypted (http://s to browser) |
-| **Auth Method** | ngrok Basic Auth (auto-generated password) |
-| **Data Persistence** | ~/.hermes/ (Docker volume) |
-| **Network Mode** | NAT (no port forwarding needed) |
-| **Cost** | Free (ngrok free tier) |
-
----
-
-## 📄 License
-
-This project is licensed under the same terms as the original [n8n-ngrok-automation](https://github.com/ahmed-el-mahdy/n8n-ngrok-automation) project.
-
----
-
-## 🙏 Credits
-
-**Inspired by:** [n8n-ngrok-automation](https://github.com/ahmed-el-mahdy/n8n-ngrok-automation)  
-**Created by:** Ahmed El-Mahdy (Senior DevOps Engineer)  
-**Project:** Hermes Agent + Ngrok Automation  
-
-**Key Technologies:**
-- 🤖 [Hermes Agent](https://github.com/NousResearch/Hermes) by NousResearch
-- 🌐 [ngrok](https://ngrok.com) for HTTPS tunneling
-- 🐳 [Docker](https://docker.com) for containerization
-- 🔄 [Docker Compose](https://docs.docker.com/compose/) for orchestration
-- 🐧 [Ubuntu](https://ubuntu.com) as base OS
-
----
-
-**Status:** ✅ **Production Ready**  
-**Last Updated:** 2026-06-02  
-**Version:** 1.0
+This deployment is suitable for a personal workstation VM. For wider production use, add a static domain, rate limiting, monitored backups, and an identity-aware edge policy.

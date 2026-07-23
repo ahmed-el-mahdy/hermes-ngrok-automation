@@ -18,7 +18,6 @@ url-watcher.log
 current-url.txt
 
 # Docker & Compose
-.dockerignore
 docker-compose.override.yml
 
 # IDE & Editor

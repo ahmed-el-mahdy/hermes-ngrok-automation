@@ -1,0 +1,8 @@
+FROM ghcr.io/open-webui/open-webui:v0.10.2
+
+USER root
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends nodejs npm \
+    && npm cache clean --force \
+    && rm -rf /var/lib/apt/lists/*
