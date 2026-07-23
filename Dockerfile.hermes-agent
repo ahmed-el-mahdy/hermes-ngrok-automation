@@ -1,13 +1,45 @@
 FROM nousresearch/hermes-agent:latest
 
 ENV VIRTUAL_ENV=/opt/hermes/.venv
+ENV PIP_TARGET=/opt/data/python-packages
+ENV PYTHONPATH=/opt/data/python-packages
+ENV UV_CACHE_DIR=/opt/data/cache/uv
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        file \
+        jq \
+        libmagic1 \
+        poppler-utils \
+        tesseract-ocr \
+        tesseract-ocr-ara \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN uv pip install \
     "faster-whisper==1.2.1" \
     "sounddevice==0.5.5" \
     "numpy==2.4.3" \
-    "edge-tts==7.2.7"
+    "edge-tts==7.2.7" \
+    "beautifulsoup4>=4.13,<5" \
+    "ddgs>=9,<10" \
+    "lxml>=5.4,<7" \
+    "PyMuPDF>=1.25,<2" \
+    "python-docx>=1.1,<2" \
+    "pypdf>=5.4,<7" \
+    "pdfplumber>=0.11,<1" \
+    "openpyxl>=3.1,<4" \
+    "pip>=25,<27"
 
 COPY patch-hermes-stt.py /tmp/patch-hermes-stt.py
 RUN /opt/hermes/.venv/bin/python /tmp/patch-hermes-stt.py \
-    && rm /tmp/patch-hermes-stt.py
+    && rm /tmp/patch-hermes-stt.py \
+    && ln -sf /opt/hermes/bin/hermes /usr/local/bin/hermes \
+    && ln -sf /opt/hermes/.venv/bin/python /usr/local/bin/hermes-python
+
+COPY hermes-admin.py /usr/local/bin/hermes-admin
+COPY validate-hermes-runtime.py /usr/local/bin/validate-hermes-runtime
+COPY validate-telegram.py /usr/local/bin/validate-telegram
+RUN chmod 0755 \
+    /usr/local/bin/hermes-admin \
+    /usr/local/bin/validate-hermes-runtime \
+    /usr/local/bin/validate-telegram

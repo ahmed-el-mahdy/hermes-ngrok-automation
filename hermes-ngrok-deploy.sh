@@ -72,9 +72,15 @@ command -v openssl >/dev/null || die "openssl is required"
 docker info >/dev/null 2>&1 || die "Docker daemon is not available to this user"
 
 mkdir -p "$PROJECT_DIR" "$HOME/.hermes" "$HOME/hermes_workspace" "$PROJECT_DIR/logs" "$HOME/hermes-backups"
+mkdir -p "$PROJECT_DIR/scripts"
 install -m 0644 "$SOURCE_DIR/docker-compose.yml" "$COMPOSE_FILE"
 install -m 0644 "$SOURCE_DIR/Dockerfile.hermes-agent" "$PROJECT_DIR/Dockerfile.hermes-agent"
 install -m 0644 "$SOURCE_DIR/patch-hermes-stt.py" "$PROJECT_DIR/patch-hermes-stt.py"
+install -m 0755 "$SOURCE_DIR/hermes-admin.py" "$PROJECT_DIR/hermes-admin.py"
+install -m 0755 "$SOURCE_DIR/configure-hermes-runtime.py" "$PROJECT_DIR/configure-hermes-runtime.py"
+install -m 0755 "$SOURCE_DIR/configure-hermes-runtime.sh" "$PROJECT_DIR/configure-hermes-runtime.sh"
+install -m 0755 "$SOURCE_DIR/validate-hermes-runtime.py" "$PROJECT_DIR/validate-hermes-runtime.py"
+install -m 0755 "$SOURCE_DIR/scripts/monitor_gold.py" "$PROJECT_DIR/scripts/monitor_gold.py"
 install -m 0644 "$SOURCE_DIR/Dockerfile.open-webui" "$PROJECT_DIR/Dockerfile.open-webui"
 
 if [[ ! -f "$ENV_FILE" ]]; then
@@ -117,6 +123,18 @@ fi
 
 info "Building and starting Hermes, Open WebUI, and ngrok"
 compose up -d --build
+
+for _ in $(seq 1 45); do
+  if docker exec hermes-agent test -s /opt/data/config.yaml 2>/dev/null; then
+    break
+  fi
+  sleep 2
+done
+docker exec hermes-agent test -s /opt/data/config.yaml \
+  || die "Hermes did not create its persistent config"
+
+info "Applying the durable Hermes runtime profile"
+HERMES_PROJECT_DIR="$PROJECT_DIR" bash "$PROJECT_DIR/configure-hermes-runtime.sh"
 
 for _ in $(seq 1 60); do
   health="$(docker inspect hermes-open-webui --format '{{.State.Health.Status}}' 2>/dev/null || true)"

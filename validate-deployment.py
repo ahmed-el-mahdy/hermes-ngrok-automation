@@ -78,6 +78,7 @@ chat_status, chat_body = request(
         "stream": False,
         "max_tokens": 60,
     },
+    timeout=90,
 )
 choices = (chat_body or {}).get("choices") or []
 chat_content = str((choices[0].get("message") or {}).get("content") or "") if choices else ""

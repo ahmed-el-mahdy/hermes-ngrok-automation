@@ -2,6 +2,7 @@
 set -euo pipefail
 
 : "${GOOGLE_API_KEY:?GOOGLE_API_KEY is required}"
+: "${OPENROUTER_API_KEY:?OPENROUTER_API_KEY is required}"
 PROJECT_DIR="${HERMES_PROJECT_DIR:-$HOME/hermes-ngrok}"
 HERMES_DATA_DIR="${HERMES_DATA_DIR:-$HOME/.hermes}"
 BACKUP_ROOT="${HERMES_BACKUP_DIR:-$HOME/hermes-backups}"
@@ -15,6 +16,7 @@ docker cp hermes-agent:/opt/data/.env "$backup_dir/hermes.env.bak"
 docker cp hermes-agent:/opt/data/config.yaml "$backup_dir/config.yaml.bak"
 
 export GOOGLE_API_KEY
+export OPENROUTER_API_KEY
 PROJECT_ENV="$PROJECT_DIR/.env" python3 - <<'PY'
 from pathlib import Path
 import os
@@ -23,6 +25,7 @@ path = Path(os.environ['PROJECT_ENV'])
 updates = {
     'GOOGLE_API_KEY': os.environ['GOOGLE_API_KEY'],
     'GEMINI_API_KEY': os.environ['GOOGLE_API_KEY'],
+    'OPENROUTER_API_KEY': os.environ['OPENROUTER_API_KEY'],
 }
 remove = {'NARA_ROUTER_API_KEY'}
 lines = path.read_text().splitlines()
@@ -45,6 +48,7 @@ PY
 
 docker exec -u root \
   -e GOOGLE_API_KEY \
+  -e OPENROUTER_API_KEY \
   hermes-agent /bin/bash -lc '
     set -euo pipefail
     . /opt/hermes/.venv/bin/activate
@@ -57,6 +61,7 @@ env_path = Path("/opt/data/.env")
 updates = {
     "GOOGLE_API_KEY": os.environ["GOOGLE_API_KEY"],
     "GEMINI_API_KEY": os.environ["GOOGLE_API_KEY"],
+    "OPENROUTER_API_KEY": os.environ["OPENROUTER_API_KEY"],
 }
 remove = {"NARA_ROUTER_API_KEY"}
 lines = env_path.read_text().splitlines()
@@ -79,12 +84,22 @@ env_path.write_text("\n".join(out) + "\n")
 config_path = Path("/opt/data/config.yaml")
 config = yaml.safe_load(config_path.read_text()) or {}
 config["model"] = {
-    "default": "gemini-3.1-flash-lite",
-    "provider": "gemini",
-    "base_url": "https://generativelanguage.googleapis.com/v1beta",
+    "default": "nvidia/nemotron-3-super-120b-a12b:free",
+    "provider": "openrouter",
+    "base_url": "https://openrouter.ai/api/v1",
 }
 config.setdefault("providers", {}).pop("nararouter", None)
 config["fallback_providers"] = [
+    {
+        "provider": "openrouter",
+        "model": "openai/gpt-oss-20b:free",
+        "base_url": "https://openrouter.ai/api/v1",
+    },
+    {
+        "provider": "openrouter",
+        "model": "openrouter/free",
+        "base_url": "https://openrouter.ai/api/v1",
+    },
     {
         "provider": "gemini",
         "model": "gemini-2.5-flash",
@@ -92,7 +107,7 @@ config["fallback_providers"] = [
     },
 ]
 config.setdefault("agent", {})["api_max_retries"] = 1
-config["agent"]["tool_use_enforcement"] = ["gemini"]
+config["agent"]["tool_use_enforcement"] = ["gemini", "openrouter"]
 for task, settings in (config.get("auxiliary") or {}).items():
     if isinstance(settings, dict):
         settings["provider"] = "gemini"
@@ -132,6 +147,6 @@ fi
 
 echo "backup_dir=$backup_dir"
 echo 'gateway=healthy'
-echo 'primary=gemini-3.1-flash-lite'
-echo 'fallbacks=gemini-2.5-flash'
+echo 'primary=openrouter/nvidia/nemotron-3-super-120b-a12b:free'
+echo 'fallbacks=openai/gpt-oss-20b:free,openrouter/free,gemini-2.5-flash'
 echo 'local_qwen=Open WebUI native Ollama API'

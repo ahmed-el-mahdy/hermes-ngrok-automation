@@ -2,7 +2,7 @@
 
 Deploy Hermes Agent behind Open WebUI and publish only the Open WebUI login through ngrok. The Hermes dashboard and API remain bound to the VM loopback interface.
 
-The custom dashboard image is pinned to Open WebUI `v0.10.2` and adds Node.js for the canonical Code Executor tool. The custom Hermes image adds the supported local `faster-whisper` voice runtime.
+The custom dashboard image is pinned to Open WebUI `v0.10.2` and adds Node.js for the canonical Code Executor tool. The custom Hermes image adds local voice, document extraction, OCR, web parsing, and persistent Python package support.
 
 ## Architecture
 
@@ -11,7 +11,7 @@ Browser
   -> ngrok HTTPS endpoint
   -> Open WebUI :8080
      -> Hermes OpenAI-compatible API :8642
-        -> Gemini primary and cloud fallback
+        -> OpenRouter free primary/fallback, then Gemini fallback
      -> Windows Ollama native API :11434
         -> qwen3-4b-gpu:latest
 ```
@@ -69,12 +69,14 @@ Container recreation does not remove these locations. Do not use `docker compose
 
 ## Model Routing
 
-The validated cloud routing policy inside Hermes is:
+The validated automatic cloud routing policy inside Hermes is:
 
-1. `gemini-3.1-flash-lite`
-2. `gemini-2.5-flash`
+1. `nvidia/nemotron-3-super-120b-a12b:free` through OpenRouter
+2. `openai/gpt-oss-20b:free`
+3. `openrouter/free`
+4. `gemini-2.5-flash`
 
-The local model is published separately as `hermes-local-gpu`. Open WebUI calls `qwen3-4b-gpu:latest` through Ollama's native `/api/chat` endpoint, which preserves Ollama reasoning behavior and avoids the empty-content responses seen through the OpenAI compatibility endpoint. Provider credentials are runtime secrets and must never be committed.
+The explicit OpenRouter models and automatic free router were live-tested with tool calling. Nemotron is first because it had the lowest direct response latency in the live checks. Gemini remains a final fallback because exhausted Google quota must not block ordinary sessions. The local model is published separately as `hermes-local-gpu`. Open WebUI calls `qwen3-4b-gpu:latest` through Ollama's native `/api/chat` endpoint, which preserves Ollama reasoning behavior and avoids the empty-content responses seen through the OpenAI compatibility endpoint. Provider credentials are runtime secrets and must never be committed.
 
 ### Persistent Windows Ollama
 
@@ -109,10 +111,10 @@ OLLAMA_BASE_URL='http://192.168.1.2:11434' bash configure-openwebui-providers.sh
 PORTAL_EMAIL='admin@hermes.local' PORTAL_PASSWORD='...' bash deploy-model-catalog.sh
 ```
 
-Apply the routing policy without putting keys on disk in the repository:
+Apply the routing policy and runtime hardening without putting keys in the repository:
 
 ```bash
-GOOGLE_API_KEY='...' bash apply-model-routing.sh
+bash configure-hermes-runtime.sh
 ```
 
 Published Open WebUI profiles:
@@ -121,6 +123,34 @@ Published Open WebUI profiles:
 - `orchestrator`, `searcher`, `scraper`, `builder`, `coder`
 - `reviewer`, `designer`, `consultant`, `coordinator`
 - `hermes-local-gpu` through the native Ollama API
+
+Inspect or switch an approved Hermes route without printing credentials:
+
+```bash
+docker exec hermes-agent hermes-admin status
+docker exec hermes-agent hermes-admin models
+docker exec hermes-agent hermes-admin use openrouter-gpt
+```
+
+Changes selected with `hermes-admin use` apply to new sessions.
+
+## Autonomous Runtime
+
+`configure-hermes-runtime.sh` fixes persistent cache ownership and installs a shell profile that exposes `hermes`, `hermes-admin`, `pip`, and `uv` to agent terminal sessions. Python packages installed with `pip` persist under `/opt/data/python-packages`.
+
+The image includes:
+
+- PDF text extraction with Poppler, PyMuPDF, pypdf, and pdfplumber
+- DOCX and XLSX handling with python-docx and openpyxl
+- Arabic and English OCR with Tesseract
+- HTML parsing with Beautiful Soup and lxml
+- `jq`, `file`, and the Hermes CLI on `PATH`
+
+Runtime loop guardrails stop repeated failures, terminal and delegated work have bounded timeouts, and cron runs only one job at a time. OpenRouter requests stop after 60 seconds, silent streams stop after 45 seconds, and a complete gateway request stops after five minutes. The agent policy tells Hermes to use the installed key-free DDGS `web_search` backend and `browser_snapshot` instead of looking for a nonexistent `web-search` skill.
+
+### Gold Monitor
+
+The daily cron script is installed at `~/.hermes/scripts/monitor_gold.py`. It reads live XAU/USD and USD/EGP JSON feeds, calculates an indicative 21K EGP price, stores an atomic history under `~/.hermes/state`, and alerts only when the configured percentage is crossed. The result excludes Egyptian dealer margin and workmanship, so it must be confirmed locally before a purchase.
 
 ## Canonical Tools
 
@@ -139,6 +169,17 @@ Path traversal, shell operators, and private-network URL requests are rejected. 
 ## Dashboard Prompts
 
 The deployment library contains ten reusable prompts for coding, research, project building, review, orchestration, continuation, durable memory, recommendations, scraping, and debugging. They are installed through Open WebUI's prompt API, not direct database edits.
+
+## Phone Access
+
+Open WebUI is an installable Progressive Web App. Open the same ngrok URL on the phone, sign in, then:
+
+- Android Chrome: menu, then **Install app** or **Add to Home screen**
+- iPhone/iPad Safari: **Share**, then **Add to Home Screen**
+
+Use the installed Open WebUI app for the full dashboard, long chats, files, and model selection. Use Telegram for quick requests, voice, photos, scheduled alerts, and notifications. The two interfaces complement each other; Telegram does not need to replace the portal.
+
+Official references: [Open WebUI getting started](https://docs.openwebui.com/getting-started/) and [phone/PWA guide](https://docs.openwebui.com/ecosystem/computer/phone-and-remote/phone-app/).
 
 ## Telegram
 
@@ -181,6 +222,7 @@ The acceptance suite verifies:
 - all ten prompt patterns
 - the 30-skill matrix
 - four workflows: FastAPI, research, shell automation, and UI build
+- document/OCR dependencies, persistent Python installs, cache ownership, loop guardrails, model routing, and the live gold monitor
 
 Evidence is written to `~/hermes_workspace/shared/outputs/`. See [Deployment Guide](docs/DEPLOYMENT_GUIDE.md) for commands and [Implementation Plan](docs/IMPLEMENTATION_PLAN.md) for the current architecture and acceptance gates.
 

@@ -32,7 +32,7 @@ Each deployment wrapper creates a timestamped database backup under `~/hermes-ba
 
 ## Model Routing
 
-Cloud routing is stored in `~/.hermes/config.yaml` and secrets in `~/.hermes/.env`. The recommended automatic order is Gemini 3.1 Flash Lite and then Gemini 2.5 Flash. Local Qwen is a separate model in Open WebUI because Hermes' fallback transport uses OpenAI chat completions while this Qwen build responds correctly through Ollama's native API.
+Cloud routing is stored in `~/.hermes/config.yaml` and secrets in `~/.hermes/.env`. Run `bash configure-hermes-runtime.sh` after adding provider keys. The automatic order is explicit OpenRouter Nemotron, explicit `openai/gpt-oss-20b:free`, `openrouter/free`, and then Gemini 2.5 Flash. This keeps exhausted Gemini quota or one slow free route from stalling every chat. Local Qwen is a separate model in Open WebUI because Hermes' fallback transport uses OpenAI chat completions while this Qwen build responds correctly through Ollama's native API.
 
 Validate each provider independently before adding it to the fallback chain. Interpret common responses as follows:
 
@@ -45,6 +45,22 @@ Validate each provider independently before adding it to the fallback chain. Int
 | 429 | Quota or rate limit reached |
 
 Do not publish a preset for a route that does not return a successful chat completion.
+
+Use `docker exec hermes-agent hermes-admin status` to inspect routing and `hermes-admin models` to list approved aliases without displaying credentials.
+
+## Runtime Tooling
+
+The custom Hermes image includes Poppler, Tesseract Arabic OCR, PyMuPDF, pypdf, pdfplumber, python-docx, openpyxl, Beautiful Soup, lxml, `jq`, and `file`. Runtime setup fixes the persistent uv/Hugging Face cache ownership and provides a user-writable persistent Python package target.
+
+```bash
+bash configure-hermes-runtime.sh
+docker exec -u 10000 hermes-agent sh -lc \
+  '. /opt/data/home/.hermes_env; hermes-admin status; pip --version'
+```
+
+The runtime profile also enables repeated-failure hard stops, limits OpenRouter requests to 60 seconds and silent streams to 45 seconds, limits the complete gateway request to five minutes, serializes cron jobs, installs the key-free DDGS search backend, and documents the correct direct web-tool names for the agent.
+
+The gold monitor lives at `~/.hermes/scripts/monitor_gold.py`; cron must reference only `monitor_gold.py`, not an absolute path. Its 21K value is an indicative global spot conversion and excludes dealer margins and workmanship.
 
 ## Local Ollama Model
 
@@ -127,6 +143,12 @@ cd ~/hermes-ngrok
 docker compose up -d --build --force-recreate
 ```
 
+## Phone Access
+
+Open WebUI is a Progressive Web App, so the ngrok portal can be installed directly from the phone browser. Use Chrome's **Install app** on Android or Safari's **Share > Add to Home Screen** on iPhone/iPad. Use Open WebUI for full dashboard work and Telegram for quick voice/photo requests and notifications.
+
+See the official [Open WebUI phone guide](https://docs.openwebui.com/ecosystem/computer/phone-and-remote/phone-app/).
+
 ## Backup
 
 Back up these locations before upgrades:
@@ -152,7 +174,11 @@ Remove ngrok Basic Auth/OAuth, use the Open WebUI email login, and clear cached 
 
 ### Agent does not answer
 
-Inspect `hermes-agent` logs, verify its authenticated `/v1/models` endpoint, test the primary provider, then test each fallback independently.
+Inspect `hermes-agent` logs, run `hermes-admin status`, verify its authenticated `/v1/models` endpoint, test the primary provider, then test each fallback independently. A repeated `429` means quota exhaustion; do not keep retrying the same provider.
+
+### Agent repeats commands or appears stuck
+
+Confirm `tool_loop_guardrails.hard_stop_enabled` is true and rerun `configure-hermes-runtime.sh`. Every external operation should have a timeout; after two identical failures Hermes is instructed to change approach instead of repeating the command.
 
 ### Node execution fails
 
