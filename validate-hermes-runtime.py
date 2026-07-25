@@ -40,6 +40,7 @@ COMMANDS = (
     "tesseract",
     "uv",
     "validate-vision",
+    "validate-telegram-media",
 )
 MODULES = (
     "bs4",
@@ -91,10 +92,20 @@ checks["writable_terminal_cwd"] = (
 checks["serialized_cron"] = config.get("cron", {}).get("max_parallel_jobs") == 1
 checks["fallbacks"] = len(config.get("fallback_providers") or []) >= 1
 fallbacks = config.get("fallback_providers") or []
-checks["local_gpu_first_fallback"] = bool(
+expected_first_fallback = (
+    ("ollama-cloud", "gpt-oss:20b")
+    if os.getenv("OLLAMA_API_KEY")
+    else ("ollama-local", "qwen3-4b-gpu:latest")
+)
+checks["preferred_first_fallback"] = bool(
     fallbacks
-    and fallbacks[0].get("provider") == "ollama-local"
-    and fallbacks[0].get("model") == "qwen3-4b-gpu:latest"
+    and fallbacks[0].get("provider") == expected_first_fallback[0]
+    and fallbacks[0].get("model") == expected_first_fallback[1]
+)
+checks["local_gpu_fallback"] = any(
+    fallback.get("provider") == "ollama-local"
+    and fallback.get("model") == "qwen3-4b-gpu:latest"
+    for fallback in fallbacks
 )
 custom_providers = {
     item.get("name"): item
@@ -113,6 +124,29 @@ if os.getenv("NARAROUTER_API_KEY"):
     checks["nararouter_key_env"] = (
         custom_providers.get("nararouter", {}).get("key_env")
         == "NARAROUTER_API_KEY"
+    )
+if os.getenv("OLLAMA_API_KEY"):
+    checks["ollama_cloud_before_local"] = (
+        next(
+            (
+                index
+                for index, fallback in enumerate(fallbacks)
+                if fallback.get("provider") == "ollama-cloud"
+            ),
+            -1,
+        )
+        < next(
+            (
+                index
+                for index, fallback in enumerate(fallbacks)
+                if fallback.get("provider") == "ollama-local"
+            ),
+            -1,
+        )
+    )
+    checks["ollama_cloud_key_env"] = (
+        custom_providers.get("ollama-cloud", {}).get("key_env")
+        == "OLLAMA_API_KEY"
     )
 checks["auxiliary_auto_routing"] = all(
     task == "vision"
@@ -194,6 +228,36 @@ checks["quota_policy"] = "Use hermes-admin quota" in str(
 checks["artifact_delivery_policy"] = (
     "A path or MEDIA marker in prose is not proof of delivery"
     in str(config.get("agent", {}).get("system_prompt") or "")
+)
+telegram_display = (
+    config.get("display", {}).get("platforms", {}).get("telegram", {})
+)
+checks["telegram_quiet_delivery"] = (
+    telegram_display.get("tool_progress") == "off"
+    and telegram_display.get("streaming") is False
+    and telegram_display.get("interim_assistant_messages") is False
+    and telegram_display.get("busy_ack_detail") is False
+)
+checks["telegram_confirmed_tts_policy"] = (
+    "gateway automatically attaches every successful TTS artifact"
+    in str(config.get("agent", {}).get("system_prompt") or "")
+)
+checks["tts_delivery_patch"] = all(
+    marker in Path(path).read_text(encoding="utf-8")
+    for path, marker in (
+        (
+            "/opt/hermes/tools/tts_tool.py",
+            "HERMES_EDGE_TTS_OUTPUT_PATH_FIX",
+        ),
+        (
+            "/opt/hermes/gateway/run.py",
+            "HERMES_AUTODELIVER_TTS_MEDIA",
+        ),
+        (
+            "/opt/hermes/tools/send_message_tool.py",
+            "HERMES_TELEGRAM_VOICE_RETRY",
+        ),
+    )
 )
 if os.getenv("TELEGRAM_BOT_TOKEN"):
     checks["telegram_home_channel"] = bool(

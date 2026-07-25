@@ -88,6 +88,16 @@ skip_restart="${HERMES_RUNTIME_SKIP_RESTART:-0}"
 if [[ "$skip_restart" =~ ^(1|true|yes)$ ]]; then
   echo "runtime_restart=skipped"
 else
+  for _ in $(seq 1 120); do
+    active_agents="$(docker exec hermes-agent jq -r \
+      '.active_agents // 0' /opt/data/gateway_state.json 2>/dev/null || echo 0)"
+    [[ "$active_agents" == "0" ]] && break
+    sleep 5
+  done
+  if [[ "${active_agents:-0}" != "0" ]]; then
+    echo 'ERROR: Hermes is busy; configuration was saved but restart was deferred' >&2
+    exit 2
+  fi
   docker compose --env-file .env -f docker-compose.yml restart \
     ollama-bridge hermes-agent >/dev/null
 fi

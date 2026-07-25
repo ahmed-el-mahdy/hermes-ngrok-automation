@@ -24,6 +24,7 @@ GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta"
 NARAROUTER_URL = "https://router.bynara.id/v1"
 NARAROUTER_PLANS_URL = "https://router.bynara.id/api/plans"
 OLLAMA_BRIDGE_URL = "http://ollama-bridge:8000/v1"
+OLLAMA_CLOUD_URL = "https://ollama.com/v1"
 
 ALIASES = {
     "nara-mistral": {
@@ -43,6 +44,12 @@ ALIASES = {
         "default": "qwen3-4b-gpu:latest",
         "base_url": OLLAMA_BRIDGE_URL,
         "credential": None,
+    },
+    "ollama-cloud": {
+        "provider": "ollama-cloud",
+        "default": "gpt-oss:20b",
+        "base_url": OLLAMA_CLOUD_URL,
+        "credential": "OLLAMA_API_KEY",
     },
     "openrouter-gpt": {
         "provider": "openrouter",
@@ -181,6 +188,11 @@ def print_quota() -> int:
     print("nararouter_exact_plan=dashboard-only")
     print("nararouter_exact_remaining_tokens=dashboard-only")
     print("nararouter_reset_free_plan=00:00_UTC")
+    print("ollama_cloud_free_session_reset=5_hours")
+    print("ollama_cloud_free_weekly_reset=7_days")
+    print("ollama_cloud_free_concurrency=1")
+    print("ollama_cloud_recommended=gpt-oss:20b")
+    print("ollama_cloud_exact_remaining_usage=dashboard-only")
     print("local_gpu_cloud_quota=none")
     print("local_gpu_limits=hardware,context,concurrency")
     return 0
