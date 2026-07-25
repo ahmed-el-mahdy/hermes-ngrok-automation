@@ -5,7 +5,7 @@ PROJECT_DIR="${HERMES_PROJECT_DIR:-$HOME/hermes-ngrok}"
 BACKUP_ROOT="${HERMES_BACKUP_DIR:-$HOME/hermes-backups}"
 STT_MODEL="${STT_MODEL:-large-v3-turbo}"
 STT_LANGUAGE="${STT_LANGUAGE:-ar}"
-TTS_VOICE="${TTS_VOICE:-ar-EG-ShakirNeural}"
+TTS_VOICE="${TTS_VOICE:-ar-EG-SalmaNeural}"
 
 case "$STT_MODEL" in
   tiny|base|small|medium|large-v3|large-v3-turbo|turbo) ;;
@@ -25,6 +25,7 @@ docker exec -u root \
   -i hermes-agent /opt/hermes/.venv/bin/python - <<'PY'
 from pathlib import Path
 import os
+import re
 import yaml
 
 path = Path('/opt/data/config.yaml')
@@ -43,6 +44,20 @@ stt['local']['language'] = os.environ['STT_LANGUAGE']
 voice = config.setdefault('voice', {})
 voice['auto_tts'] = False
 voice['max_recording_seconds'] = 120
+
+telegram_display = (
+    config.setdefault('display', {})
+    .setdefault('platforms', {})
+    .setdefault('telegram', {})
+)
+telegram_display.update({
+    'tool_progress': 'off',
+    'streaming': False,
+    'interim_assistant_messages': False,
+    'busy_ack_detail': False,
+    'cleanup_progress': True,
+    'long_running_notifications': True,
+})
 
 has_openrouter = bool(os.environ.get('OPENROUTER_API_KEY', '').strip())
 has_nararouter = bool(os.environ.get('NARAROUTER_API_KEY', '').strip())
@@ -79,11 +94,25 @@ else:
 
 marker = '[TELEGRAM_MEDIA_POLICY]'
 policy = '''[TELEGRAM_MEDIA_POLICY]
-Speak to this user in natural, clear Egyptian Arabic by default, using familiar Egyptian wording without exaggerating slang. Switch languages when the user asks. For Telegram media: analyze attached images directly and explain what is visible, while stating uncertainty when needed. An attached image path means the image is available: never claim that image analysis is unsupported when pre-analysis or vision_analyze returned visual content. If a vision result is a refusal such as "cannot view" or "cannot analyze", treat it as a failed vision route and retry through the configured vision fallback rather than repeating the refusal. Incoming voice messages are transcribed automatically; answer their meaning rather than discussing the audio file path. When the user explicitly asks for a voice or audio reply in Arabic or English, call the text_to_speech tool so Telegram receives a playable voice message. Do not generate voice for ordinary text replies unless explicitly requested.'''
+Speak to this user in natural, clear Egyptian Arabic by default, using familiar Egyptian wording without exaggerating slang. Switch languages when the user asks. For Telegram media: analyze attached images directly and explain what is visible, while stating uncertainty when needed. An attached image path means the image is available: never claim that image analysis is unsupported when pre-analysis or vision_analyze returned visual content. If a vision result is a refusal such as "cannot view" or "cannot analyze", treat it as a failed vision route and retry through the configured vision fallback rather than repeating the refusal. If the image contains text or the user's correction depends on visual details, call vision_analyze on the supplied image path instead of relying only on a generic pre-analysis. Never infer that a Telegram display name such as PersonalAgent identifies a different bot. Incoming voice messages are transcribed automatically; answer their meaning rather than discussing the audio file path. For an explicit voice reply, call text_to_speech using only its documented arguments. The gateway automatically attaches every successful TTS result from the current turn, including multiple voice samples, so do not call send_message for the returned local path and never expose that path. Say that the audio samples are attached below; never claim that Telegram confirmed delivery. The provider and default voice are centrally configured, so never invent unsupported arguments. Do not generate voice for ordinary text replies unless explicitly requested.'''
 agent = config.setdefault('agent', {})
 existing = str(agent.get('system_prompt') or '').strip()
 if marker in existing:
-    existing = existing.split(marker, 1)[0].rstrip()
+    start = existing.index(marker)
+    following = re.search(
+        r'\n\n\[[A-Z0-9_]+_POLICY\]',
+        existing[start + len(marker):],
+    )
+    end = (
+        start + len(marker) + following.start()
+        if following
+        else len(existing)
+    )
+    existing = '\n\n'.join(
+        part
+        for part in (existing[:start].strip(), existing[end:].strip())
+        if part
+    )
 agent['system_prompt'] = (existing + '\n\n' + policy).strip()
 
 path.write_text(yaml.safe_dump(config, sort_keys=False, allow_unicode=True))
@@ -91,6 +120,18 @@ PY
 
 docker exec -u root hermes-agent sh -lc \
   'chown 10000:10000 /opt/data/config.yaml && chmod 600 /opt/data/config.yaml'
+
+for _ in $(seq 1 120); do
+  active_agents="$(docker exec hermes-agent jq -r \
+    '.active_agents // 0' /opt/data/gateway_state.json 2>/dev/null || echo 0)"
+  [[ "$active_agents" == "0" ]] && break
+  sleep 5
+done
+if [[ "${active_agents:-0}" != "0" ]]; then
+  echo 'ERROR: Hermes is busy; configuration was saved but restart was deferred' >&2
+  exit 2
+fi
+
 docker compose --env-file .env -f docker-compose.yml up -d --build --force-recreate hermes-agent
 
 docker exec \
@@ -109,12 +150,15 @@ for _ in $(seq 1 60); do
     'import faster_whisper, edge_tts' >/dev/null 2>&1 \
     && docker exec hermes-agent grep -q 'HERMES_STT_INITIAL_PROMPT' \
       /opt/hermes/tools/transcription_tools.py \
+    && docker exec hermes-agent grep -q 'HERMES_AUTODELIVER_TTS_MEDIA' \
+      /opt/hermes/gateway/run.py \
     && docker logs --since 2m hermes-agent 2>&1 | grep -q 'Hermes Gateway Starting'; then
     echo 'telegram_media=ready'
     echo "stt=local/$STT_MODEL"
     echo "stt_language=${STT_LANGUAGE:-auto}"
     echo "tts=edge/$TTS_VOICE"
     docker exec -u 10000 hermes-agent hermes config get auxiliary.vision
+    docker exec -u 10000 hermes-agent validate-telegram-media
     echo 'auto_tts=false'
     echo "backup_dir=$backup_dir"
     exit 0

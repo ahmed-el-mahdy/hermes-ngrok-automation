@@ -41,8 +41,10 @@ RUN uv pip install \
 RUN npm install --global --omit=dev "pptxgenjs@4.0.1"
 
 COPY patch-hermes-stt.py /tmp/patch-hermes-stt.py
+COPY patch-hermes-media-delivery.py /tmp/patch-hermes-media-delivery.py
 RUN /opt/hermes/.venv/bin/python /tmp/patch-hermes-stt.py \
-    && rm /tmp/patch-hermes-stt.py \
+    && /opt/hermes/.venv/bin/python /tmp/patch-hermes-media-delivery.py \
+    && rm /tmp/patch-hermes-stt.py /tmp/patch-hermes-media-delivery.py \
     && ln -sf /opt/hermes/.venv/bin/hermes /usr/local/bin/hermes \
     && ln -sf /opt/hermes/.venv/bin/python /usr/local/bin/hermes-python
 
@@ -52,6 +54,7 @@ COPY validate-hermes-runtime.py /usr/local/bin/validate-hermes-runtime
 COPY validate-telegram.py /usr/local/bin/validate-telegram
 COPY validate-model-routes.py /usr/local/bin/validate-model-routes
 COPY validate-vision.py /usr/local/bin/validate-vision
+COPY validate-telegram-media.py /usr/local/bin/validate-telegram-media
 COPY ollama-openai-bridge.py /opt/hermes-extensions/ollama-openai-bridge.py
 RUN chmod 0755 \
     /usr/local/bin/hermes-admin \
@@ -60,6 +63,7 @@ RUN chmod 0755 \
     /usr/local/bin/validate-telegram \
     /usr/local/bin/validate-model-routes \
     /usr/local/bin/validate-vision \
+    /usr/local/bin/validate-telegram-media \
     /opt/hermes-extensions/ollama-openai-bridge.py \
     && sed -i 's/\r$//' \
     /usr/local/bin/hermes-admin \
@@ -68,4 +72,5 @@ RUN chmod 0755 \
     /usr/local/bin/validate-telegram \
     /usr/local/bin/validate-model-routes \
     /usr/local/bin/validate-vision \
+    /usr/local/bin/validate-telegram-media \
     /opt/hermes-extensions/ollama-openai-bridge.py

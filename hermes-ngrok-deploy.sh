@@ -15,6 +15,19 @@ compose() {
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
 }
 
+wait_for_agent_idle() {
+  local active_agents=0
+  [[ "$(docker inspect -f '{{.State.Running}}' hermes-agent 2>/dev/null || true)" == "true" ]] \
+    || return 0
+  for _ in $(seq 1 120); do
+    active_agents="$(docker exec hermes-agent jq -r \
+      '.active_agents // 0' /opt/data/gateway_state.json 2>/dev/null || echo 0)"
+    [[ "$active_agents" == "0" ]] && return 0
+    sleep 5
+  done
+  die "Hermes is still handling a task; restart was cancelled to avoid interruption"
+}
+
 random_secret() {
   openssl rand -hex "${1:-24}"
 }
@@ -39,6 +52,7 @@ status() {
 
 restart() {
   [[ -f "$COMPOSE_FILE" && -f "$ENV_FILE" ]] || die "No deployment found at $PROJECT_DIR"
+  wait_for_agent_idle
   compose up -d --build --force-recreate
   status
 }
@@ -76,6 +90,7 @@ mkdir -p "$PROJECT_DIR/scripts"
 install -m 0644 "$SOURCE_DIR/docker-compose.yml" "$COMPOSE_FILE"
 install -m 0644 "$SOURCE_DIR/Dockerfile.hermes-agent" "$PROJECT_DIR/Dockerfile.hermes-agent"
 install -m 0644 "$SOURCE_DIR/patch-hermes-stt.py" "$PROJECT_DIR/patch-hermes-stt.py"
+install -m 0644 "$SOURCE_DIR/patch-hermes-media-delivery.py" "$PROJECT_DIR/patch-hermes-media-delivery.py"
 install -m 0755 "$SOURCE_DIR/ollama-openai-bridge.py" "$PROJECT_DIR/ollama-openai-bridge.py"
 install -m 0755 "$SOURCE_DIR/hermes-admin.py" "$PROJECT_DIR/hermes-admin.py"
 install -m 0755 "$SOURCE_DIR/configure-hermes-runtime.py" "$PROJECT_DIR/configure-hermes-runtime.py"
@@ -85,6 +100,7 @@ install -m 0755 "$SOURCE_DIR/validate-hermes-runtime.py" "$PROJECT_DIR/validate-
 install -m 0755 "$SOURCE_DIR/validate-telegram.py" "$PROJECT_DIR/validate-telegram.py"
 install -m 0755 "$SOURCE_DIR/validate-model-routes.py" "$PROJECT_DIR/validate-model-routes.py"
 install -m 0755 "$SOURCE_DIR/validate-vision.py" "$PROJECT_DIR/validate-vision.py"
+install -m 0755 "$SOURCE_DIR/validate-telegram-media.py" "$PROJECT_DIR/validate-telegram-media.py"
 install -m 0755 "$SOURCE_DIR/validate-automatic-failover.sh" "$PROJECT_DIR/validate-automatic-failover.sh"
 install -m 0755 "$SOURCE_DIR/validate-delegation-failover.sh" "$PROJECT_DIR/validate-delegation-failover.sh"
 install -m 0755 "$SOURCE_DIR/scripts/monitor_gold.py" "$PROJECT_DIR/scripts/monitor_gold.py"
@@ -137,6 +153,7 @@ fi
 
 info "Building and starting Hermes, the local GPU bridge, Open WebUI, and ngrok"
 if [[ "$existing_agent" -eq 1 ]]; then
+  wait_for_agent_idle
   compose up -d --build --force-recreate ollama-bridge hermes-agent
   compose up -d open-webui ngrok-hermes
 else

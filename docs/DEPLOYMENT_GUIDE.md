@@ -32,7 +32,7 @@ Each deployment wrapper creates a timestamped database backup under `~/hermes-ba
 
 ## Model Routing
 
-Cloud routing is stored in `~/.hermes/config.yaml` and provider secrets remain in the Compose environment or persistent Hermes environment. Run `bash configure-hermes-runtime.sh` after adding provider keys. The automatic order is NaraRouter Mistral, local GPU Qwen, NaraRouter GLM, OpenRouter Nemotron, OpenRouter's free router, and Gemini 2.5 Flash. The local route is deliberately second so exhausted cloud quotas cannot stop the task.
+Cloud routing is stored in `~/.hermes/config.yaml` and provider secrets remain in the Compose environment or persistent Hermes environment. Run `bash configure-hermes-runtime.sh` after adding provider keys. The automatic order is NaraRouter Mistral, Ollama Cloud `gpt-oss:20b` when `OLLAMA_API_KEY` is configured, local GPU Qwen, NaraRouter GLM, OpenRouter Nemotron, OpenRouter's free router, and Gemini 2.5 Flash. Ollama Cloud is never inserted without working authentication; local Qwen remains the immediate no-cloud-quota recovery route.
 
 `hermes-ollama-bridge` is private to the Compose network. It converts Hermes'
 OpenAI-compatible requests to Ollama's native `/api/chat`, including streaming
@@ -81,7 +81,8 @@ docker exec -u 10000 hermes-agent sh -lc \
   '. /opt/data/home/.hermes_env; hermes-admin status; pip --version'
 ```
 
-The standalone runtime command performs one controlled restart. For an update
+The standalone runtime command performs one controlled restart after
+`gateway_state.json` reports zero active agents. For an update
 that will recreate the container, apply the configuration first and skip that
 internal restart, then replace Hermes once:
 
@@ -189,7 +190,12 @@ Never set `GATEWAY_ALLOW_ALL_USERS=true` or `TELEGRAM_ALLOW_ALL_USERS=true` on a
 
 ### Telegram Media
 
-Run `bash configure-telegram-media.sh` to enable the persistent media profile. It builds `Dockerfile.hermes-agent` with Hermes' pinned `faster-whisper` dependencies and a guarded STT tuning patch, configures forced-Arabic transcription with Egyptian context and silence filtering, selects an Egyptian Arabic Edge TTS voice, keeps automatic TTS disabled, and adds instructions for Egyptian Arabic conversation and on-demand audio replies. Vision is pinned to NaraRouter's multimodal `mistral-medium-3-5` instead of inheriting the text-only main model, with direct Gemini 2.5 Flash as the configured fallback. OpenRouter's free multimodal Gemma route is used only when neither of those credentials is available.
+Run `bash configure-telegram-media.sh` to enable the persistent media profile. It builds `Dockerfile.hermes-agent` with Hermes' pinned `faster-whisper` dependencies and guarded STT/media patches, configures forced-Arabic transcription with Egyptian context and silence filtering, selects the free Egyptian female Edge voice `ar-EG-SalmaNeural`, keeps automatic TTS disabled for ordinary replies, and adds instructions for Egyptian Arabic conversation. For an explicit voice request, the gateway collects and attaches every successful current-turn TTS result automatically, including multiple voice samples; it does not depend on the model remembering a second `send_message` call. Telegram tool progress, streaming, and interim assistant chatter are disabled to avoid Flood Control. Vision is pinned to NaraRouter's multimodal `mistral-medium-3-5` instead of inheriting the text-only main model, with direct Gemini 2.5 Flash as the configured fallback. OpenRouter's free multimodal Gemma route is used only when neither of those credentials is available.
+
+The active chat model only chooses and coordinates these tools. Edge TTS
+creates outgoing speech, local Whisper transcribes incoming voice, and the
+separate vision route analyzes images. A switch between NaraRouter Mistral and
+local Qwen therefore cannot fix or change the audio voice by itself.
 
 The default `large-v3-turbo` model was selected from a real Egyptian Telegram sample: it preserved the Egyptian wording while transcribing in 16.4 seconds, compared with 21.8 seconds for `medium`; `small` was faster but misheard important words. Setup prefetches the selected model into `/opt/data/cache/huggingface`. Set `STT_MODEL=small` only when lower latency matters more than transcription accuracy.
 
@@ -199,6 +205,15 @@ Validation should cover all three paths:
 Telegram voice -> cached OGG -> local Whisper -> agent response
 Telegram photo -> cached image -> NaraRouter Mistral Medium vision -> Gemini fallback -> agent response
 Explicit voice request -> Edge TTS -> OGG/Opus -> Telegram voice note
+```
+
+Validate generation without sending a message, or perform a real delivery
+check to a configured target:
+
+```bash
+docker exec -u 10000 hermes-agent validate-telegram-media
+docker exec -u 10000 hermes-agent \
+  validate-telegram-media --send-target telegram:<chat_id>
 ```
 
 ## Operations
