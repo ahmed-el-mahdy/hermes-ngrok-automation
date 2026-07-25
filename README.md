@@ -1,6 +1,9 @@
 # Hermes Open WebUI Automation
 
-Deploy Hermes Agent behind Open WebUI and publish only the Open WebUI login through ngrok. The native Hermes dashboard is disabled; the Hermes API remains bound to the VM loopback interface.
+Deploy Hermes Agent with two authenticated web surfaces: Open WebUI for
+day-to-day chat and the native Hermes dashboard for agent administration. Only
+Open WebUI is published through ngrok by default; the Hermes API remains bound
+to the VM loopback interface.
 
 The custom dashboard image is pinned to Open WebUI `v0.10.2` and adds Node.js for the canonical Code Executor tool. The custom Hermes image is pinned to the tested Hermes release `v2026.7.20` and adds local voice, document extraction, OCR, web parsing, and persistent Python package support. Release upgrades are deliberate and must pass the voice, Telegram, browser, document, and runtime checks before the pin moves.
 
@@ -8,8 +11,9 @@ The custom dashboard image is pinned to Open WebUI `v0.10.2` and adds Node.js fo
 
 ```text
 Browser
-  -> ngrok HTTPS endpoint
-  -> Open WebUI :8080
+  -> ngrok HTTPS endpoint -> Open WebUI :8080
+  -> trusted LAN/VPN      -> Hermes dashboard :9119
+Open WebUI
      -> Hermes OpenAI-compatible API :8642
         -> NaraRouter primary
         -> local Ollama bridge and GPU fallback
@@ -23,11 +27,40 @@ The deployment uses four containers on one private Docker bridge network:
 | Container | Purpose | Host exposure |
 | --- | --- | --- |
 | `hermes-open-webui` | Authenticated chat dashboard | `127.0.0.1:3000` |
-| `hermes-agent` | Agent gateway and model router | `127.0.0.1:8642` |
+| `hermes-agent` | Agent gateway, model router, and authenticated native dashboard | `127.0.0.1:8642`, configurable dashboard bind on `9119` |
 | `hermes-ollama-bridge` | Native Ollama to OpenAI compatibility bridge | None |
 | `hermes-ngrok` | HTTPS tunnel to Open WebUI | `127.0.0.1:4040` management API |
 
-ngrok Basic Auth and OAuth are intentionally absent. Users authenticate once with the Open WebUI email/password form.
+ngrok Basic Auth and OAuth are intentionally absent from the Open WebUI
+endpoint because Open WebUI has its own login. The native Hermes dashboard
+uses Hermes' gated username/password provider on a trusted LAN or VPN. Do not
+publish that password-only dashboard directly to the public internet; use
+Nous OAuth or a self-hosted OIDC provider for an internet-facing deployment.
+
+## Dashboard Access
+
+The deployment exposes two distinct interfaces:
+
+| Interface | Default address | Intended use |
+| --- | --- | --- |
+| Open WebUI | ngrok HTTPS URL printed by the deploy script | Internet/mobile chat, files, and model selection |
+| Hermes dashboard | `http://<VM_IP>:9119` when `HERMES_DASHBOARD_BIND=<VM_IP>` | Models, providers, keys, sessions, logs, skills, cron, and native Hermes chat |
+
+The deployment script gives both dashboards the same initial username and
+password, stored only in `.env` with mode `0600`. Hermes still maintains a
+separate authenticated session cookie.
+
+ngrok Free provides one assigned development domain. It can run multiple
+endpoints, but it cannot provide two independent stable public hostnames for
+these two root-based web applications. Keep Open WebUI on the free ngrok
+domain and reach Hermes through a VPN such as Tailscale, or move to an ngrok
+plan that permits another ngrok-branded domain and protect the Hermes endpoint
+with Nous OAuth/OIDC. Do not try to place Hermes under `/hermes` on the Open
+WebUI hostname: both applications use root API, asset, and WebSocket paths.
+
+References: [Hermes web dashboard](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/web-dashboard.md),
+[ngrok multiple endpoints](https://ngrok.com/docs/agent/config/v3), and
+[ngrok plan limits](https://ngrok.com/docs/pricing-limits).
 
 ## Requirements
 
