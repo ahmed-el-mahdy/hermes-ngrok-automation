@@ -33,9 +33,9 @@ ALIASES = {
         "base_url": NARAROUTER_URL,
         "credential": "NARAROUTER_API_KEY",
     },
-    "nara-glm": {
+    "nara-laguna": {
         "provider": "nararouter",
-        "default": "glm-5.2-free",
+        "default": "laguna-s-2.1",
         "base_url": NARAROUTER_URL,
         "credential": "NARAROUTER_API_KEY",
     },

@@ -6,6 +6,41 @@ BACKUP_ROOT="${HERMES_BACKUP_DIR:-$HOME/hermes-backups}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 cd "$PROJECT_DIR"
+
+# Keep standalone send_message calls aligned with the private Telegram allowlist.
+# The gateway reads TELEGRAM_HOME_CHANNEL from the container environment, not
+# from the top-level Hermes YAML key.
+python3 - "$PROJECT_DIR/.env" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+lines = path.read_text(encoding="utf-8").splitlines()
+values = {}
+for line in lines:
+    stripped = line.strip()
+    if stripped and not stripped.startswith("#") and "=" in stripped:
+        key, value = stripped.split("=", 1)
+        values[key.strip()] = value.strip()
+
+home = values.get("TELEGRAM_HOME_CHANNEL", "")
+allowed = values.get("TELEGRAM_ALLOWED_USERS", "")
+if not home and allowed:
+    home = allowed.split(",", 1)[0].strip()
+    if home:
+        replaced = False
+        for index, line in enumerate(lines):
+            if line.startswith("TELEGRAM_HOME_CHANNEL="):
+                lines[index] = f"TELEGRAM_HOME_CHANNEL={home}"
+                replaced = True
+                break
+        if not replaced:
+            lines.append(f"TELEGRAM_HOME_CHANNEL={home}")
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        path.chmod(0o600)
+        print("telegram_home_channel=derived-from-allowlist")
+PY
+
 stamp="$(date +%Y%m%d_%H%M%S)"
 backup_dir="${BACKUP_ROOT}/${stamp}-runtime"
 mkdir -p "$backup_dir"

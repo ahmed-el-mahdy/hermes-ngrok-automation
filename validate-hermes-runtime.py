@@ -24,6 +24,21 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
+ENV_PATH = Path("/opt/data/.env")
+
+
+def configured(name: str) -> bool:
+    if os.getenv(name, "").strip():
+        return True
+    if ENV_PATH.exists():
+        for raw in ENV_PATH.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if line and not line.startswith("#") and "=" in line:
+                candidate, value = line.split("=", 1)
+                if candidate.strip() == name and value.strip():
+                    return True
+    return False
+
 
 COMMANDS = (
     "file",
@@ -92,11 +107,18 @@ checks["writable_terminal_cwd"] = (
 checks["serialized_cron"] = config.get("cron", {}).get("max_parallel_jobs") == 1
 checks["fallbacks"] = len(config.get("fallback_providers") or []) >= 1
 fallbacks = config.get("fallback_providers") or []
-expected_first_fallback = (
-    ("ollama-cloud", "gpt-oss:20b")
-    if os.getenv("OLLAMA_API_KEY")
-    else ("ollama-local", "qwen3-4b-gpu:latest")
-)
+if configured("OLLAMA_API_KEY"):
+    expected_first_fallback = ("ollama-cloud", "gpt-oss:20b")
+elif (
+    configured("OPENROUTER_API_KEY")
+    and config.get("model", {}).get("provider") != "openrouter"
+):
+    expected_first_fallback = (
+        "openrouter",
+        "nvidia/nemotron-3-super-120b-a12b:free",
+    )
+else:
+    expected_first_fallback = ("ollama-local", "qwen3-4b-gpu:latest")
 checks["preferred_first_fallback"] = bool(
     fallbacks
     and fallbacks[0].get("provider") == expected_first_fallback[0]
@@ -107,6 +129,31 @@ checks["local_gpu_fallback"] = any(
     and fallback.get("model") == "qwen3-4b-gpu:latest"
     for fallback in fallbacks
 )
+if (
+    configured("NARAROUTER_API_KEY")
+    and configured("OLLAMA_API_KEY")
+    and configured("OPENROUTER_API_KEY")
+):
+    checks["local_gpu_fourth_overall"] = (
+        len(fallbacks) >= 3
+        and fallbacks[2].get("provider") == "ollama-local"
+        and fallbacks[2].get("model") == "qwen3-4b-gpu:latest"
+    )
+    checks["independent_free_clouds_before_local"] = (
+        fallbacks[0].get("provider") == "ollama-cloud"
+        and fallbacks[1].get("provider") == "openrouter"
+    )
+if configured("NARAROUTER_API_KEY"):
+    checks["nara_recovery_current"] = any(
+        fallback.get("provider") == "nararouter"
+        and fallback.get("model") == "laguna-s-2.1"
+        for fallback in fallbacks
+    )
+    checks["removed_stale_nara_glm"] = not any(
+        fallback.get("provider") == "nararouter"
+        and fallback.get("model") == "glm-5.2-free"
+        for fallback in fallbacks
+    )
 custom_providers = {
     item.get("name"): item
     for item in (config.get("custom_providers") or [])
@@ -116,7 +163,7 @@ checks["ollama_bridge_configured"] = (
     custom_providers.get("ollama-local", {}).get("base_url")
     == "http://ollama-bridge:8000/v1"
 )
-if os.getenv("NARAROUTER_API_KEY"):
+if configured("NARAROUTER_API_KEY"):
     checks["nararouter_primary"] = (
         config.get("model", {}).get("provider") == "nararouter"
         and config.get("model", {}).get("default") == "mistral-large"
@@ -125,7 +172,7 @@ if os.getenv("NARAROUTER_API_KEY"):
         custom_providers.get("nararouter", {}).get("key_env")
         == "NARAROUTER_API_KEY"
     )
-if os.getenv("OLLAMA_API_KEY"):
+if configured("OLLAMA_API_KEY"):
     checks["ollama_cloud_before_local"] = (
         next(
             (
@@ -156,7 +203,7 @@ checks["auxiliary_auto_routing"] = all(
 )
 delegation = config.get("delegation") or {}
 expected_delegation_provider = (
-    "nararouter" if os.getenv("NARAROUTER_API_KEY") else "ollama-local"
+    "nararouter" if configured("NARAROUTER_API_KEY") else "ollama-local"
 )
 expected_delegation_model = (
     "mistral-large"
@@ -259,7 +306,7 @@ checks["tts_delivery_patch"] = all(
         ),
     )
 )
-if os.getenv("TELEGRAM_BOT_TOKEN"):
+if configured("TELEGRAM_BOT_TOKEN"):
     checks["telegram_home_channel"] = bool(
         str(config.get("TELEGRAM_HOME_CHANNEL") or "").strip()
     )

@@ -76,20 +76,21 @@ The validated automatic cloud routing policy inside Hermes is:
 
 1. `mistral-large` through NaraRouter
 2. `gpt-oss:20b` through Ollama Cloud when `OLLAMA_API_KEY` is configured
-3. `qwen3-4b-gpu:latest` through the local Ollama bridge
-4. `glm-5.2-free` through NaraRouter
-5. `nvidia/nemotron-3-super-120b-a12b:free` through OpenRouter
+3. `nvidia/nemotron-3-super-120b-a12b:free` through OpenRouter
+4. `qwen3-4b-gpu:latest` through the local Ollama bridge
+5. `laguna-s-2.1` through NaraRouter
 6. `openrouter/free`
 7. `gemini-2.5-flash`
 
-NaraRouter Mistral, NaraRouter GLM, and local Qwen were live-tested with tool calling. Ollama Cloud is inserted only when its API key is configured and its `gpt-oss:20b` route passes validation; this low-usage model runs before local Qwen, while local Qwen remains the immediate no-cloud-quota recovery route. A 15-second no-progress timeout moves a slow NaraRouter call to the next route instead of leaving the user waiting. The private `hermes-ollama-bridge` translates Hermes OpenAI-wire requests to Ollama's reliable native `/api/chat` endpoint; it is not exposed on the host or through ngrok. All auxiliary tasks use `provider: auto` and inherit the same failover chain instead of being pinned to Gemini. Open WebUI also keeps its direct native Ollama connection and publishes the local model separately as `hermes-local-gpu`. Provider credentials are runtime secrets and must never be committed.
+NaraRouter Mistral, Ollama Cloud GPT-OSS, OpenRouter Nemotron, NaraRouter Laguna, and local Qwen were live-tested with tool calling. The first three positions use independent free cloud allowances before local Qwen takes the fourth overall position. `glm-5.2-free` was removed after its live endpoint returned HTTP 404. Ollama Cloud uses its low-usage `gpt-oss:20b` model to stretch the rolling session and weekly allowance; OpenRouter is an additional independent route but its free account allowance is much smaller. A 15-second no-progress timeout moves a slow NaraRouter call to the next route instead of leaving the user waiting. The private `hermes-ollama-bridge` translates Hermes OpenAI-wire requests to Ollama's reliable native `/api/chat` endpoint; it is not exposed on the host or through ngrok. All auxiliary tasks use `provider: auto` and inherit the same failover chain instead of being pinned to Gemini. Open WebUI also keeps its direct native Ollama connection and publishes the local model separately as `hermes-local-gpu`. Provider credentials are runtime secrets and must never be committed.
 
 Delegated workers are pinned independently to NaraRouter `mistral-large` when
-that provider is configured and inherit the same fallback chain, so their first
-recovery route is local GPU Qwen. Without NaraRouter they run locally from the
-start. Delegation is serialized to one child at a time to protect provider
-request quotas and GPU capacity; each child has 20 iterations and a ten-minute
-wall-clock budget for bounded, verifiable work.
+that provider is configured and inherit the same fallback chain, including the
+independent Ollama Cloud and OpenRouter allowances before local GPU Qwen.
+Without NaraRouter they run locally from the start. Delegation is serialized to
+one child at a time to protect provider request quotas and GPU capacity; each
+child has 20 iterations and a ten-minute wall-clock budget for bounded,
+verifiable work.
 
 Use `bash validate-delegation-failover.sh` after a routing change to force only
 the child route to return HTTP 429, prove recovery through local Qwen, and

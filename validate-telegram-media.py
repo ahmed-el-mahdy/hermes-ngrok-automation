@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 
 import yaml
@@ -15,7 +16,10 @@ import yaml
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--send-target",
-    help="Optional Telegram target used for a real voice delivery check",
+    help=(
+        "Optional Telegram delivery target. Use 'telegram', "
+        "'telegram:chat_id', or a numeric chat ID."
+    ),
 )
 args = parser.parse_args()
 
@@ -26,6 +30,7 @@ telegram_display = (
 )
 tts = config.get("tts", {})
 stt = config.get("stt", {})
+system_prompt = str(config.get("agent", {}).get("system_prompt") or "")
 
 checks = {
     "tts_edge": tts.get("provider") == "edge",
@@ -43,6 +48,10 @@ checks = {
     ),
     "telegram_busy_detail_off": (
         telegram_display.get("busy_ack_detail") is False
+    ),
+    "delivery_truth_policy": (
+        "Never promise a later upload" in system_prompt
+        and "invent a helper bot" in system_prompt
     ),
 }
 
@@ -100,11 +109,14 @@ delivery = None
 if args.send_target and checks["tts_ogg_opus"]:
     from tools.send_message_tool import send_message_tool
 
+    delivery_target = args.send_target.strip()
+    if re.fullmatch(r"-?\d+(?::\d+)?", delivery_target):
+        delivery_target = f"telegram:{delivery_target}"
     delivery = json.loads(
         send_message_tool(
             {
                 "action": "send",
-                "target": args.send_target,
+                "target": delivery_target,
                 "message": (
                     "[[audio_as_voice]]\n"
                     f"MEDIA:{actual_path}"

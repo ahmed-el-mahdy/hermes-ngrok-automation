@@ -32,7 +32,7 @@ Each deployment wrapper creates a timestamped database backup under `~/hermes-ba
 
 ## Model Routing
 
-Cloud routing is stored in `~/.hermes/config.yaml` and provider secrets remain in the Compose environment or persistent Hermes environment. Run `bash configure-hermes-runtime.sh` after adding provider keys. The automatic order is NaraRouter Mistral, Ollama Cloud `gpt-oss:20b` when `OLLAMA_API_KEY` is configured, local GPU Qwen, NaraRouter GLM, OpenRouter Nemotron, OpenRouter's free router, and Gemini 2.5 Flash. Ollama Cloud is never inserted without working authentication; local Qwen remains the immediate no-cloud-quota recovery route.
+Cloud routing is stored in `~/.hermes/config.yaml` and provider secrets remain in the Compose environment or persistent Hermes environment. Run `bash configure-hermes-runtime.sh` after adding provider keys. With all current credentials configured, the automatic order is NaraRouter Mistral, Ollama Cloud `gpt-oss:20b`, OpenRouter Nemotron, local GPU Qwen as the fourth overall route, NaraRouter Laguna S 2.1, OpenRouter's free router, and Gemini 2.5 Flash. A provider is omitted when its credential is unavailable. Ollama Cloud is never inserted without working authentication. The removed NaraRouter `glm-5.2-free` identifier must not be restored: its live endpoint returned HTTP 404 on July 25, 2026.
 
 `hermes-ollama-bridge` is private to the Compose network. It converts Hermes'
 OpenAI-compatible requests to Ollama's native `/api/chat`, including streaming
@@ -44,9 +44,10 @@ silent or queued request moves to local Qwen.
 `delegate_task` workers use a separate pinned primary:
 NaraRouter `mistral-large` when its credential exists, otherwise local
 `qwen3-4b-gpu:latest`. Hermes v0.19 passes the parent's fallback chain to every
-child, so a NaraRouter quota or availability failure immediately recovers through
-local Qwen. Only one delegated child runs at a time, preventing the parent and
-multiple children from exhausting the provider's request window together.
+child, so a NaraRouter quota or availability failure consumes the independent
+free cloud routes before recovering through local Qwen. Only one delegated child
+runs at a time, preventing the parent and multiple children from exhausting the
+provider's request window together.
 Children have 20 iterations, a ten-minute wall-clock limit, and a 12,000
 character summary ceiling.
 

@@ -54,11 +54,12 @@ remain subject to Hermes security auditing before use.
 ## Model Routing
 
 - Primary cloud route: NaraRouter `mistral-large`
-- Immediate fallback: local `qwen3-4b-gpu:latest` through the private Ollama bridge
-- Recovery routes: NaraRouter `glm-5.2-free`, OpenRouter, then Gemini 2.5 Flash
+- Cloud fallbacks: Ollama Cloud `gpt-oss:20b`, then OpenRouter Nemotron
+- Fourth route: local `qwen3-4b-gpu:latest` through the private Ollama bridge
+- Recovery routes: NaraRouter `laguna-s-2.1`, OpenRouter free router, then Gemini
 - Auxiliary tasks: automatic routing through the same resilient chain
 - Delegated workers: pinned NaraRouter `mistral-large` primary with inherited
-  local-Qwen-first fallback; local Qwen primary when NaraRouter is unavailable
+  quota-aware fallbacks; local Qwen primary when NaraRouter is unavailable
 - Delegation guard: one child at a time, 20 iterations, ten-minute hard limit
 - Vision route: NaraRouter `mistral-medium-3-5` first, direct Gemini 2.5 Flash
   fallback; never inherit the text-only NaraRouter `mistral-large` chat model

@@ -1,10 +1,11 @@
 #!/opt/hermes/.venv/bin/python
-"""Validate the independent NaraRouter, local bridge, and gateway routes."""
+"""Validate every preferred cloud source, local bridge, and gateway route."""
 
 from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 import time
 
 import httpx
@@ -12,8 +13,24 @@ import httpx
 
 NARA_URL = "https://router.bynara.id/v1/chat/completions"
 OLLAMA_CLOUD_URL = "https://ollama.com/v1/chat/completions"
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 BRIDGE_URL = "http://ollama-bridge:8000"
 GATEWAY_URL = "http://127.0.0.1:8642/v1/chat/completions"
+ENV_PATH = Path("/opt/data/.env")
+
+
+def configured_value(name: str) -> str:
+    value = os.getenv(name, "").strip()
+    if value:
+        return value
+    if ENV_PATH.exists():
+        for raw in ENV_PATH.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if line and not line.startswith("#") and "=" in line:
+                candidate, value = line.split("=", 1)
+                if candidate.strip() == name:
+                    return value.strip()
+    return ""
 
 
 def tool_payload(model: str) -> dict:
@@ -43,7 +60,7 @@ def tool_payload(model: str) -> dict:
         ],
         "tool_choice": "auto",
         "temperature": 0,
-        "max_tokens": 160,
+        "max_tokens": 320,
     }
 
 
@@ -71,23 +88,27 @@ with httpx.Client(timeout=timeout) as client:
         .get("tool_calls")
     )
 
-    nara_key = os.getenv("NARAROUTER_API_KEY", "")
+    nara_key = configured_value("NARAROUTER_API_KEY")
     if nara_key:
-        started = time.monotonic()
-        nara = client.post(
-            NARA_URL,
-            headers={"Authorization": f"Bearer {nara_key}"},
-            json=tool_payload("mistral-large"),
-        )
-        timings["nara_tool_call"] = round(time.monotonic() - started, 2)
-        nara.raise_for_status()
-        checks["nara_tool_call"] = bool(
-            nara.json().get("choices", [{}])[0]
-            .get("message", {})
-            .get("tool_calls")
-        )
+        for check_name, model in (
+            ("nara_mistral_tool_call", "mistral-large"),
+            ("nara_laguna_tool_call", "laguna-s-2.1"),
+        ):
+            started = time.monotonic()
+            nara = client.post(
+                NARA_URL,
+                headers={"Authorization": f"Bearer {nara_key}"},
+                json=tool_payload(model),
+            )
+            timings[check_name] = round(time.monotonic() - started, 2)
+            nara.raise_for_status()
+            checks[check_name] = bool(
+                nara.json().get("choices", [{}])[0]
+                .get("message", {})
+                .get("tool_calls")
+            )
 
-    ollama_key = os.getenv("OLLAMA_API_KEY", "")
+    ollama_key = configured_value("OLLAMA_API_KEY")
     if ollama_key:
         started = time.monotonic()
         ollama_cloud = client.post(
@@ -105,7 +126,27 @@ with httpx.Client(timeout=timeout) as client:
             .get("tool_calls")
         )
 
-    api_key = os.getenv("API_SERVER_KEY", "")
+    openrouter_key = configured_value("OPENROUTER_API_KEY")
+    if openrouter_key:
+        started = time.monotonic()
+        openrouter = client.post(
+            OPENROUTER_URL,
+            headers={"Authorization": f"Bearer {openrouter_key}"},
+            json=tool_payload(
+                "nvidia/nemotron-3-super-120b-a12b:free"
+            ),
+        )
+        timings["openrouter_tool_call"] = round(
+            time.monotonic() - started, 2
+        )
+        openrouter.raise_for_status()
+        checks["openrouter_tool_call"] = bool(
+            openrouter.json().get("choices", [{}])[0]
+            .get("message", {})
+            .get("tool_calls")
+        )
+
+    api_key = configured_value("API_SERVER_KEY")
     if api_key:
         started = time.monotonic()
         gateway = client.post(

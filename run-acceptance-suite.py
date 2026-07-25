@@ -393,7 +393,7 @@ specialist_prompts = {
     "coder": "Create a concise implementation note for a FastAPI API where missing item IDs now return HTTP 404 and three regression tests pass.",
     "reviewer": "Create a concise review closure note: the original missing-item endpoint returned 200/null; it was fixed to 404 with a regression test; all three tests pass. Lead with the resolved finding and mention residual in-memory storage limitation.",
     "designer": "Create a concise design rationale for a responsive operations dashboard with portal/model/tool status, activity table, semantic markup, visible focus, and mobile stacking.",
-    "consultant": "Create a concise routing recommendation: NaraRouter Mistral primary, local Qwen 3 4B GPU as the immediate fallback through the private Ollama bridge, then independent cloud recovery routes. Mention cloud quota risk and the local quality tradeoff.",
+    "consultant": "Create a concise routing recommendation: NaraRouter Mistral primary, independent Ollama Cloud and OpenRouter free routes next, local Qwen 3 4B GPU fourth through the private Ollama bridge, then recovery routes. Mention cloud quota risk and the local quality tradeoff.",
     "coordinator": "Create a concise task-board summary: infrastructure, tools, 11 models, 10 prompts, and four workflows are done; Telegram activation is blocked pending bot token and authorized user ID; final restart verification remains.",
 }
 def generate_specialist(item):
@@ -501,9 +501,10 @@ write(
     """# HERMES Model Routing
 
 1. Primary: NaraRouter `mistral-large`
-2. Immediate fallback: local `qwen3-4b-gpu:latest` through the private Ollama bridge
-3. Recovery routes: NaraRouter `glm-5.2-free`, OpenRouter, then Gemini 2.5 Flash
-4. Local direct model: `hermes-local-gpu` through Open WebUI's native Ollama API
+2. Cloud fallbacks: Ollama Cloud `gpt-oss:20b`, then OpenRouter Nemotron
+3. Fourth overall route: local `qwen3-4b-gpu:latest` through the private Ollama bridge
+4. Recovery routes: NaraRouter `laguna-s-2.1`, OpenRouter free router, then Gemini
+5. Local direct model: `hermes-local-gpu` through Open WebUI's native Ollama API
 
 The private bridge translates Hermes OpenAI-compatible requests to Ollama's native API. All auxiliary tasks inherit the same automatic chain. Keys are stored only in runtime configuration and are intentionally absent from this report.
 """,

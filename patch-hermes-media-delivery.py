@@ -36,7 +36,7 @@ patch_once(
 ''',
     '''    # HERMES_TTS_GATEWAY_AUTODELIVERY_SCHEMA: the gateway collects every
     # successful current-turn TTS artifact and delivers it as native media.
-    "description": "Generate speech audio for the current messaging reply. The gateway automatically attaches every successful current-turn TTS result as native media, including multiple comparison samples. Do not call send_message for the returned local path and do not expose it in prose. Say that audio is attached below, never that Telegram confirmed delivery. Voice and provider are centrally configured; do not pass provider_config or invent extra arguments.",
+    "description": "Generate speech audio for the current messaging reply. The gateway automatically attaches every successful current-turn TTS result as native media, including multiple comparison samples. Do not call send_message for the returned local path and do not expose it in prose. You may say the generated audio is attached by the gateway, but never claim Telegram confirmed receipt. Never promise a later upload or invent a helper bot. Voice and provider are centrally configured; do not pass provider_config or invent extra arguments.",
 ''',
 )
 
