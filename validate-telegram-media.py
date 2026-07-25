@@ -63,8 +63,9 @@ source_markers = {
     ),
     "/opt/hermes/gateway/run.py": (
         "HERMES_AUTODELIVER_TTS_MEDIA",
+        "HERMES_CANONICALIZE_TELEGRAM_TTS",
         "HERMES_LIVE_MODEL_STATUS",
-        "HERMES_TELEGRAM_VOICE_TRUTH",
+        "HERMES_TRUST_TOOL_TTS_OVER_MODEL_MEDIA",
     ),
     "/opt/hermes/gateway/platforms/base.py": (
         "HERMES_CONFIRMED_TELEGRAM_VOICE_DELIVERY",
@@ -197,6 +198,71 @@ async def validate_gateway_voice_delivery() -> dict[str, bool]:
 
 
 checks.update(asyncio.run(validate_gateway_voice_delivery()))
+
+
+def validate_model_media_regression() -> dict[str, bool]:
+    from gateway.config import Platform
+    from gateway.run import (
+        _canonicalize_telegram_tts_response,
+        _collect_auto_append_media_tags,
+    )
+
+    call_id = "voice-regression-call"
+    path = "/opt/data/audio_cache/voice_regression.ogg"
+    messages = [
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": call_id,
+                    "type": "function",
+                    "function": {
+                        "name": "text_to_speech",
+                        "arguments": '{"text":"test"}',
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": call_id,
+            "content": json.dumps(
+                {
+                    "success": True,
+                    "file_path": path,
+                    "media_tag": f"[[audio_as_voice]]\nMEDIA:{path}",
+                    "provider": "edge",
+                    "voice_compatible": True,
+                }
+            ),
+        },
+        {
+            "role": "assistant",
+            "content": (
+                "تم إرسال الصوت بنجاح. الصوت هو ar-EG-AmanyNeural.\n"
+                f"MEDIA:{path}"
+            ),
+        },
+    ]
+    media_tags, has_voice = _collect_auto_append_media_tags(messages)
+    canonical = _canonicalize_telegram_tts_response(
+        Platform.TELEGRAM,
+        str(messages[-1]["content"]),
+        media_tags,
+        has_voice,
+    )
+    return {
+        "model_media_regression_tool_path_detected": (
+            media_tags == [f"MEDIA:{path}"]
+        ),
+        "model_media_regression_voice_directive_detected": has_voice is True,
+        "model_media_regression_false_claim_removed": (
+            canonical == f"[[audio_as_voice]]\nMEDIA:{path}"
+        ),
+    }
+
+
+checks.update(validate_model_media_regression())
 
 os.environ["HERMES_SESSION_PLATFORM"] = "telegram"
 from tools.tts_tool import text_to_speech_tool

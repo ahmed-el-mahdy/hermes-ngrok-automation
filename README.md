@@ -15,9 +15,10 @@ Browser
   -> trusted LAN/VPN      -> Hermes dashboard :9119
 Open WebUI
      -> Hermes OpenAI-compatible API :8642
-        -> NaraRouter primary
+        -> Ollama Cloud primary
+        -> two OpenRouter free recovery routes
         -> local Ollama bridge and GPU fallback
-        -> OpenRouter and Gemini recovery routes
+        -> enabled NaraRouter and Gemini recovery routes
      -> Windows Ollama native API :11434
         -> qwen3-4b-gpu:latest
 ```
@@ -107,23 +108,22 @@ Container recreation does not remove these locations. Do not use `docker compose
 
 The validated automatic cloud routing policy inside Hermes is:
 
-1. `mistral-large` through NaraRouter
-2. `gpt-oss:20b` through Ollama Cloud when `OLLAMA_API_KEY` is configured
-3. `nvidia/nemotron-3-super-120b-a12b:free` through OpenRouter
+1. `gpt-oss:20b` through Ollama Cloud when `OLLAMA_API_KEY` is configured
+2. `nvidia/nemotron-3-super-120b-a12b:free` through OpenRouter
+3. `openrouter/free`
 4. `qwen3-4b-gpu:latest` through the local Ollama bridge
-5. `laguna-s-2.1` through NaraRouter
-6. `openrouter/free`
+5. `mistral-large` through NaraRouter when health-enabled
+6. `laguna-s-2.1` through NaraRouter when health-enabled
 7. `gemini-2.5-flash`
 
-NaraRouter Mistral, Ollama Cloud GPT-OSS, OpenRouter Nemotron, NaraRouter Laguna, and local Qwen were live-tested with tool calling. The first three positions use independent free cloud allowances before local Qwen takes the fourth overall position. `glm-5.2-free` was removed after its live endpoint returned HTTP 404. Ollama Cloud uses its low-usage `gpt-oss:20b` model to stretch the rolling session and weekly allowance; OpenRouter is an additional independent route but its free account allowance is much smaller. A 15-second no-progress timeout moves a slow NaraRouter call to the next route instead of leaving the user waiting. The private `hermes-ollama-bridge` translates Hermes OpenAI-wire requests to Ollama's reliable native `/api/chat` endpoint; it is not exposed on the host or through ngrok. All auxiliary tasks use `provider: auto` and inherit the same failover chain instead of being pinned to Gemini. Open WebUI also keeps its direct native Ollama connection and publishes the local model separately as `hermes-local-gpu`. Provider credentials are runtime secrets and must never be committed.
+Ollama Cloud GPT-OSS, OpenRouter Nemotron, and local Qwen were live-tested with tool calling. The first three positions consume independent free cloud routes before local Qwen takes the fourth overall position. `glm-5.2-free` was removed after its live endpoint returned HTTP 404. Set `NARAROUTER_ENABLED=false` when NaraRouter returns an account gate such as `telegram_required`; this retains the credential and provider entry but removes its models from active routing until a fresh probe succeeds. Ollama Cloud uses its low-usage `gpt-oss:20b` model to stretch the rolling session and weekly allowance; OpenRouter is an additional independent route but its free account allowance is much smaller. The private `hermes-ollama-bridge` translates Hermes OpenAI-wire requests to Ollama's reliable native `/api/chat` endpoint; it is not exposed on the host or through ngrok. All auxiliary tasks use `provider: auto` and inherit the same failover chain instead of being pinned to Gemini. Open WebUI also keeps its direct native Ollama connection and publishes the local model separately as `hermes-local-gpu`. Provider credentials are runtime secrets and must never be committed.
 
-Delegated workers are pinned independently to NaraRouter `mistral-large` when
-that provider is configured and inherit the same fallback chain, including the
-independent Ollama Cloud and OpenRouter allowances before local GPU Qwen.
-Without NaraRouter they run locally from the start. Delegation is serialized to
-one child at a time to protect provider request quotas and GPU capacity; each
-child has 20 iterations and a ten-minute wall-clock budget for bounded,
-verifiable work.
+Delegated workers use Ollama Cloud `gpt-oss:20b` when it is configured and
+inherit the same fallback chain, including the two independent OpenRouter
+routes before local GPU Qwen. Without Ollama Cloud they run locally from the
+start. Delegation is serialized to one child at a time to protect provider
+request quotas and GPU capacity; each child has 20 iterations and a ten-minute
+wall-clock budget for bounded, verifiable work.
 
 Use `bash validate-delegation-failover.sh` after a routing change to force only
 the child route to return HTTP 429, prove recovery through local Qwen, and
@@ -293,12 +293,12 @@ Enable the low-cost media profile after Telegram activation:
 bash configure-telegram-media.sh
 ```
 
-This profile uses local `faster-whisper large-v3-turbo` with forced Arabic decoding, Egyptian Arabic context, beam search, and silence filtering for incoming voice messages. Free Edge TTS with the Egyptian female voice `ar-EG-SalmaNeural` handles outgoing Arabic speech. The Whisper model is downloaded during setup and cached under persistent Hermes data, so container recreation does not download it again. Ordinary replies stay text-only; for an explicit voice reply Hermes generates real OGG/Opus and the gateway automatically attaches every current-turn TTS result, including multiple comparison samples. This avoids relying on the model to remember a second delivery tool call. Telegram tool progress, token streaming, and interim assistant chatter are disabled to reduce Flood Control risk. Telegram photos, image documents, and static stickers are cached and sent first to NaraRouter's multimodal `mistral-medium-3-5`; direct Gemini 2.5 Flash is the automatic vision fallback when configured. OpenRouter's free multimodal Gemma route is used only when neither NaraRouter nor Gemini is available. Hermes answers this user in clear Egyptian Arabic by default.
+This profile uses local `faster-whisper large-v3-turbo` with forced Arabic decoding, Egyptian Arabic context, beam search, and silence filtering for incoming voice messages. Free Edge TTS with the Egyptian female voice `ar-EG-SalmaNeural` handles outgoing Arabic speech. The Whisper model is downloaded during setup and cached under persistent Hermes data, so container recreation does not download it again. Ordinary replies stay text-only; for an explicit voice reply Hermes generates real OGG/Opus and the gateway automatically attaches every current-turn TTS result, including multiple comparison samples. Tool output, not model-authored `MEDIA:` prose, is the delivery source of truth; confirmed Telegram voice delivery suppresses the model's redundant confirmation text. Telegram tool progress, token streaming, and interim assistant chatter are disabled to reduce Flood Control risk. Telegram photos, image documents, and static stickers are cached and sent first to NaraRouter's multimodal `mistral-medium-3-5` only when NaraRouter is health-enabled; direct Gemini 2.5 Flash is otherwise the automatic vision route when configured. OpenRouter's free multimodal Gemma route is used only when neither NaraRouter nor Gemini is available. Hermes answers this user in clear Egyptian Arabic by default.
 
 The chat model decides which tool to call, but it does not synthesize or
-transcribe the audio itself. Changing between NaraRouter Mistral and local Qwen
-does not change the Edge TTS voice, local Whisper transcription, or the
-separate multimodal vision route.
+transcribe the audio itself. Changing between Ollama Cloud, OpenRouter, and
+local Qwen does not change the Edge TTS voice, local Whisper transcription, or
+the separate multimodal vision route.
 
 Override the defaults when needed:
 

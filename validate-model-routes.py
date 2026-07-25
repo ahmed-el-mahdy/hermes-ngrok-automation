@@ -33,6 +33,13 @@ def configured_value(name: str) -> str:
     return ""
 
 
+def configured_flag(name: str, default: bool = True) -> bool:
+    value = configured_value(name)
+    if not value:
+        return default
+    return value.lower() not in {"0", "false", "no", "off", "disabled"}
+
+
 def tool_payload(model: str) -> dict:
     return {
         "model": model,
@@ -89,7 +96,7 @@ with httpx.Client(timeout=timeout) as client:
     )
 
     nara_key = configured_value("NARAROUTER_API_KEY")
-    if nara_key:
+    if nara_key and configured_flag("NARAROUTER_ENABLED"):
         for check_name, model in (
             ("nara_mistral_tool_call", "mistral-large"),
             ("nara_laguna_tool_call", "laguna-s-2.1"),

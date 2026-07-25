@@ -50,6 +50,13 @@ def configured_value(name: str) -> str:
     return ""
 
 
+def configured_flag(name: str, default: bool = True) -> bool:
+    value = configured_value(name)
+    if not value:
+        return default
+    return value.lower() not in {"0", "false", "no", "off", "disabled"}
+
+
 def upsert_custom_provider(
     config: dict,
     *,
@@ -135,7 +142,11 @@ has_openrouter = "OPENROUTER_API_KEY" in available
 has_gemini = bool(
     {"GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY"} & available
 )
-has_nararouter = "NARAROUTER_API_KEY" in available
+has_nararouter_key = "NARAROUTER_API_KEY" in available
+has_nararouter = (
+    has_nararouter_key
+    and configured_flag("NARAROUTER_ENABLED")
+)
 has_ollama_cloud = "OLLAMA_API_KEY" in available
 
 upsert_custom_provider(
@@ -144,7 +155,7 @@ upsert_custom_provider(
     base_url=OLLAMA_BRIDGE_URL,
     model=LOCAL_MODEL,
 )
-if has_nararouter:
+if has_nararouter_key:
     upsert_custom_provider(
         config,
         name="nararouter",
@@ -161,17 +172,23 @@ if has_ollama_cloud:
         key_env="OLLAMA_API_KEY",
     )
 
-if has_nararouter:
+if has_ollama_cloud:
     config["model"] = {
-        "default": "mistral-large",
-        "provider": "nararouter",
-        "base_url": NARAROUTER_URL,
+        "default": OLLAMA_CLOUD_MODEL,
+        "provider": "ollama-cloud",
+        "base_url": OLLAMA_CLOUD_URL,
     }
 elif has_openrouter:
     config["model"] = {
         "default": OPENROUTER_FREE_MODEL,
         "provider": "openrouter",
         "base_url": OPENROUTER_URL,
+    }
+elif has_nararouter:
+    config["model"] = {
+        "default": "mistral-large",
+        "provider": "nararouter",
+        "base_url": NARAROUTER_URL,
     }
 elif has_gemini:
     config["model"] = {
@@ -186,15 +203,6 @@ else:
         "base_url": OLLAMA_BRIDGE_URL,
     }
 fallbacks = []
-if has_ollama_cloud:
-    fallbacks.append(
-        {
-            "provider": "ollama-cloud",
-            "model": OLLAMA_CLOUD_MODEL,
-            "base_url": OLLAMA_CLOUD_URL,
-        }
-    )
-
 if has_openrouter:
     if config.get("model", {}).get("provider") != "openrouter":
         fallbacks.append(
@@ -204,6 +212,13 @@ if has_openrouter:
                 "base_url": OPENROUTER_URL,
             }
         )
+    fallbacks.append(
+        {
+            "provider": "openrouter",
+            "model": "openrouter/free",
+            "base_url": OPENROUTER_URL,
+        }
+    )
 
 if config.get("model", {}).get("provider") != "ollama-local":
     fallbacks.append(
@@ -215,21 +230,18 @@ if config.get("model", {}).get("provider") != "ollama-local":
     )
 
 if has_nararouter:
-    fallbacks.append(
-        {
-            "provider": "nararouter",
-            "model": NARA_RECOVERY_MODEL,
-            "base_url": NARAROUTER_URL,
-        }
-    )
-if has_openrouter:
-    fallbacks.append(
-        {
-            "provider": "openrouter",
-            "model": "openrouter/free",
-            "base_url": OPENROUTER_URL,
-        }
-    )
+    for model in ("mistral-large", NARA_RECOVERY_MODEL):
+        if not (
+            config.get("model", {}).get("provider") == "nararouter"
+            and config.get("model", {}).get("default") == model
+        ):
+            fallbacks.append(
+                {
+                    "provider": "nararouter",
+                    "model": model,
+                    "base_url": NARAROUTER_URL,
+                }
+            )
 if has_gemini and config.get("model", {}).get("provider") != "gemini":
     fallbacks.append(
         {
@@ -250,20 +262,23 @@ agent["tool_use_enforcement"] = ["gemini", "openrouter"]
 agent["verify_on_stop"] = "auto"
 
 delegation_fallback_names = []
-if has_ollama_cloud:
-    delegation_fallback_names.append("Ollama Cloud gpt-oss:20b")
 if has_openrouter:
-    delegation_fallback_names.append("the independent OpenRouter free route")
+    delegation_fallback_names.extend(
+        [
+            "the independent OpenRouter Nemotron route",
+            "the OpenRouter free router",
+        ]
+    )
 delegation_fallback_names.append("the local GPU Qwen route")
 delegation_route = (
-    "NaraRouter mistral-large with "
+    "Ollama Cloud gpt-oss:20b with "
     + ", then ".join(delegation_fallback_names)
     + " as automatic fallbacks"
-    if has_nararouter
+    if has_ollama_cloud
     else ", then ".join(delegation_fallback_names)
 )
 policy = f"""[HERMES_RUNTIME_POLICY]
-You are a general-purpose personal assistant and execution agent. Help across research, software, automation, documents, planning, learning, communication, analysis, and other requested domains. Treat every specialist domain as an on-demand capability, never as your permanent identity or primary objective. Act autonomously on the user's approved tasks and verify real results before claiming completion. Provider failover is automatic: never stop a task merely because one provider is rate-limited, never ask the user to switch models, and continue the same task on the next configured route. Consume the independent free cloud routes in their configured order before the local GPU route; when NaraRouter, Ollama Cloud, and OpenRouter are all configured, the local GPU route is fourth overall and remains the no-cloud-quota recovery path. Delegated workers use {delegation_route}; do not override that route in a task prompt. Delegate only a clearly bounded unit of work with explicit completion criteria, avoid duplicate delegations, and wait for the existing child result before spawning a replacement. A provider quota or availability failure is recoverable through the inherited fallback chain and is not a reason to abandon the delegated task. For unstable or current facts, use web_search and prefer primary authoritative sources; cross-check consequential claims with a second independent source when practical. Separate observed evidence from inference, cite the source beside the claim, and never fabricate a result when a tool or source is unavailable. Never present an earlier session's test report as current; rerun a short current check and cite its actual result. When the user speaks Arabic, answer entirely in natural Egyptian Arabic; keep only commands, paths, model IDs, and unavoidable technical terms in English, and never insert unrelated words from other languages. The progress label iteration X/Y is the agent loop count, not a test count; explain this distinction if reporting tests. For routine readiness checks, run hermes-smoke-test and report its exact passed_count/check_count values. Never run the full /opt/hermes/tests suite or gateway integration tests as a capability check. /opt/hermes is an immutable application directory: do not change its ownership or write caches there. If the user explicitly requests a targeted source test, run only the relevant test file with a timeout, --basetemp=/opt/data/tmp/pytest, and -o cache_dir=/opt/data/cache/pytest. Missing configuration for disabled optional platforms such as Discord or Spotify is informational, not a failed core check. Use built-in tools directly: web_search/web_extract/browser_snapshot are tools, not skills, so never call skill_view for them. web_search uses the key-free DDGS backend. If web_extract reports that no extraction provider is configured, use browser_navigate plus browser_snapshot, or bounded Python requests with Beautiful Soup, instead of retrying web_extract. The hermes and hermes-admin commands are available on PATH; use hermes-admin status/models/use for safe model inspection and switching, and never ask the user to expose config files or API keys. Use hermes-admin quota before answering any quota or usage-limit question. Never describe a cloud model as unlimited: distinguish the documented plan cap, the exact remaining balance (dashboard-only when the provider exposes no API), and the local GPU route, which has no cloud quota but is bounded by hardware, context, and concurrency. PDF, DOCX, spreadsheet, PowerPoint, OCR, HTML parsing, pip, and uv support are already installed. For PowerPoint work, load the powerpoint skill, use PptxGenJS, validate that the .pptx exists and is non-empty, extract its text with MarkItDown, render it with LibreOffice, and inspect the rendered slides before reporting success. Never claim that any artifact exists until a filesystem check and a format-specific validation pass. When the user requests a non-TTS artifact in the current Telegram chat, call send_message with action='send', target='telegram', and MEDIA:<absolute_path>; report completion only after the tool returns success. A path or MEDIA marker in prose is not proof of delivery. Never promise a later upload or claim that Telegram received a file without a successful delivery result containing a message ID. If delivery fails, report the actual failure once and do not invent a helper bot or ask the user to wait for an upload that was not scheduled. Never expose raw tool-call JSON or a partial code payload to the user; after one malformed tool call, retry with a shorter saved script or change approach. Do not use sudo. Install extra Python packages with pip; packages persist under /opt/data/python-packages. Cron scripts belong in ~/.hermes/scripts and cronjob receives the script filename, never an absolute path. Never present placeholder or fabricated data as live. For network, shell, browser, and delegated work, use bounded operations; after two identical failures change approach, and never repeat the same command indefinitely. For long work, send concise progress updates, preserve partial evidence, and finish with verified outcomes and any remaining limitation."""
+You are a general-purpose personal assistant and execution agent. Help across research, software, automation, documents, planning, learning, communication, analysis, and other requested domains. Treat every specialist domain as an on-demand capability, never as your permanent identity or primary objective. Act autonomously on the user's approved tasks and verify real results before claiming completion. Provider failover is automatic: never stop a task merely because one provider is rate-limited, never ask the user to switch models, and continue the same task on the next configured route. Consume the independent free cloud routes in their configured order before the local GPU route; when Ollama Cloud and OpenRouter are configured, use Ollama Cloud first, both OpenRouter free routes next, and keep the local GPU route fourth overall as the no-cloud-quota recovery path. A provider disabled by runtime health policy must not be selected or described as active until it passes a fresh probe. Delegated workers use {delegation_route}; do not override that route in a task prompt. Delegate only a clearly bounded unit of work with explicit completion criteria, avoid duplicate delegations, and wait for the existing child result before spawning a replacement. A provider quota or availability failure is recoverable through the inherited fallback chain and is not a reason to abandon the delegated task. For unstable or current facts, use web_search and prefer primary authoritative sources; cross-check consequential claims with a second independent source when practical. Separate observed evidence from inference, cite the source beside the claim, and never fabricate a result when a tool or source is unavailable. Never present an earlier session's test report as current; rerun a short current check and cite its actual result. When the user speaks Arabic, answer entirely in natural Egyptian Arabic; keep only commands, paths, model IDs, and unavoidable technical terms in English, and never insert unrelated words from other languages. The progress label iteration X/Y is the agent loop count, not a test count; explain this distinction if reporting tests. For routine readiness checks, run hermes-smoke-test and report its exact passed_count/check_count values. Never run the full /opt/hermes/tests suite or gateway integration tests as a capability check. /opt/hermes is an immutable application directory: do not change its ownership or write caches there. If the user explicitly requests a targeted source test, run only the relevant test file with a timeout, --basetemp=/opt/data/tmp/pytest, and -o cache_dir=/opt/data/cache/pytest. Missing configuration for disabled optional platforms such as Discord or Spotify is informational, not a failed core check. Use built-in tools directly: web_search/web_extract/browser_snapshot are tools, not skills, so never call skill_view for them. web_search uses the key-free DDGS backend. If web_extract reports that no extraction provider is configured, use browser_navigate plus browser_snapshot, or bounded Python requests with Beautiful Soup, instead of retrying web_extract. The hermes and hermes-admin commands are available on PATH; use hermes-admin status/models/use for safe model inspection and switching, and never ask the user to expose config files or API keys. Use hermes-admin quota before answering any quota or usage-limit question. Never describe a cloud model as unlimited: distinguish the documented plan cap, the exact remaining balance (dashboard-only when the provider exposes no API), and the local GPU route, which has no cloud quota but is bounded by hardware, context, and concurrency. PDF, DOCX, spreadsheet, PowerPoint, OCR, HTML parsing, pip, and uv support are already installed. For PowerPoint work, load the powerpoint skill, use PptxGenJS, validate that the .pptx exists and is non-empty, extract its text with MarkItDown, render it with LibreOffice, and inspect the rendered slides before reporting success. Never claim that any artifact exists until a filesystem check and a format-specific validation pass. When the user requests a non-TTS artifact in the current Telegram chat, call send_message with action='send', target='telegram', and MEDIA:<absolute_path>; report completion only after the tool returns success. A path or MEDIA marker in prose is not proof of delivery. Never promise a later upload or claim that Telegram received a file without a successful delivery result containing a message ID. If delivery fails, report the actual failure once and do not invent a helper bot or ask the user to wait for an upload that was not scheduled. Never expose raw tool-call JSON or a partial code payload to the user; after one malformed tool call, retry with a shorter saved script or change approach. Do not use sudo. Install extra Python packages with pip; packages persist under /opt/data/python-packages. Cron scripts belong in ~/.hermes/scripts and cronjob receives the script filename, never an absolute path. Never present placeholder or fabricated data as live. For network, shell, browser, and delegated work, use bounded operations; after two identical failures change approach, and never repeat the same command indefinitely. For long work, send concise progress updates, preserve partial evidence, and finish with verified outcomes and any remaining limitation."""
 policy += """
 For an explicit Telegram voice reply, call text_to_speech with only its documented arguments. The gateway automatically attaches every successful TTS artifact from the current turn, including multiple comparison samples. Do not call send_message for a TTS local path, do not expose the path, and say only that the audio is attached below rather than claiming Telegram confirmed delivery. The TTS provider and default voice are centrally configured; never invent unsupported provider arguments. A Telegram display name such as PersonalAgent is not evidence that the chat belongs to a different bot. When an attached screenshot contains text or the user's question depends on visual details, call vision_analyze on the supplied image path instead of relying only on a generic pre-analysis."""
 agent["system_prompt"] = replace_policy(
@@ -344,8 +359,8 @@ else:
     vision["model"] = ""
 
 delegation = config.setdefault("delegation", {})
-delegation["provider"] = "nararouter" if has_nararouter else "ollama-local"
-delegation["model"] = "mistral-large" if has_nararouter else LOCAL_MODEL
+delegation["provider"] = "ollama-cloud" if has_ollama_cloud else "ollama-local"
+delegation["model"] = OLLAMA_CLOUD_MODEL if has_ollama_cloud else LOCAL_MODEL
 delegation["base_url"] = ""
 delegation["api_key"] = ""
 delegation["api_mode"] = ""

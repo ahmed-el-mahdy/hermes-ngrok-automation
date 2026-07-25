@@ -58,6 +58,45 @@ _AUTO_APPEND_MEDIA_TOOL_NAMES = {
     "text_to_speech_tool",
     "image_generate",
 }
+    ''',
+)
+patch_once(
+    gateway_path,
+    "HERMES_CANONICALIZE_TELEGRAM_TTS",
+    '''    return media_tags, has_voice_directive
+
+
+def _collect_history_media_paths(agent_history: List[Dict[str, Any]]) -> set:
+''',
+    '''    return media_tags, has_voice_directive
+
+
+def _canonicalize_telegram_tts_response(
+    platform: Any,
+    final_response: str,
+    media_tags: List[str],
+    has_voice_directive: bool,
+) -> str:
+    """Return trusted TTS directives only for an explicit Telegram voice turn."""
+    # HERMES_CANONICALIZE_TELEGRAM_TTS: a model-authored MEDIA path or
+    # delivery claim is never evidence that Telegram received the artifact.
+    if (
+        getattr(platform, "value", platform) != "telegram"
+        or not has_voice_directive
+    ):
+        return final_response
+    trusted_voice_tags = [
+        tag
+        for tag in media_tags
+        if Path(tag.removeprefix("MEDIA:")).suffix.lower()
+        in {".ogg", ".opus", ".mp3", ".wav", ".m4a", ".flac"}
+    ]
+    if not trusted_voice_tags:
+        return final_response
+    return "[[audio_as_voice]]\\n" + "\\n".join(trusted_voice_tags)
+
+
+def _collect_history_media_paths(agent_history: List[Dict[str, Any]]) -> set:
 ''',
 )
 patch_once(
@@ -164,6 +203,94 @@ patch_once(
                         "[[audio_as_voice]]\n"
                         + "\n".join(f"MEDIA:{path}" for path in _voice_paths)
                     )
+    ''',
+)
+patch_once(
+    gateway_path,
+    "HERMES_TRUST_TOOL_TTS_OVER_MODEL_MEDIA",
+    r'''            if "MEDIA:" not in final_response:
+                media_tags, has_voice_directive = _collect_auto_append_media_tags(
+                    result.get("messages", []),
+                    history_offset=len(agent_history),
+                    history_media_paths=_history_media_paths,
+                )
+
+                if media_tags:
+                    seen = set()
+                    unique_tags = []
+                    for tag in media_tags:
+                        if tag not in seen:
+                            seen.add(tag)
+                            unique_tags.append(tag)
+                    if has_voice_directive:
+                        unique_tags.insert(0, "[[audio_as_voice]]")
+                    final_response = final_response + "\n" + "\n".join(unique_tags)
+
+            # HERMES_TELEGRAM_VOICE_TRUTH: a generated TTS file is not proof
+            # that Telegram received it. For Telegram voice turns, keep only
+            # the delivery directives in the persisted/final response. The
+            # platform delivery layer sends the voice first and emits a clear
+            # failure message only when Telegram does not return success.
+            if (
+                source.platform == Platform.TELEGRAM
+                and "[[audio_as_voice]]" in final_response
+                and "MEDIA:" in final_response
+            ):
+                _voice_paths = [
+                    match.group(1)
+                    for match in _TOOL_MEDIA_RE.finditer(final_response)
+                ]
+                if _voice_paths:
+                    final_response = (
+                        "[[audio_as_voice]]\n"
+                        + "\n".join(f"MEDIA:{path}" for path in _voice_paths)
+                    )
+''',
+    r'''            # HERMES_TRUST_TOOL_TTS_OVER_MODEL_MEDIA: always inspect the
+            # current turn's producer-tool results, even when the model copied a
+            # MEDIA path into its prose. Tool output is the delivery source of
+            # truth; model-authored paths and delivery claims are untrusted.
+            media_tags, has_voice_directive = _collect_auto_append_media_tags(
+                result.get("messages", []),
+                history_offset=len(agent_history),
+                history_media_paths=_history_media_paths,
+            )
+
+            seen = set()
+            unique_tags = []
+            for tag in media_tags:
+                if tag not in seen:
+                    seen.add(tag)
+                    unique_tags.append(tag)
+
+            if unique_tags:
+                missing_tags = [
+                    tag for tag in unique_tags if tag not in final_response
+                ]
+                if missing_tags:
+                    prefix = ""
+                    if (
+                        has_voice_directive
+                        and "[[audio_as_voice]]" not in final_response
+                    ):
+                        prefix = "[[audio_as_voice]]\n"
+                    final_response = (
+                        final_response
+                        + "\n"
+                        + prefix
+                        + "\n".join(missing_tags)
+                    )
+
+            # A successful TTS tool result means an audio artifact exists, not
+            # that Telegram has received it. Canonicalize Telegram TTS turns to
+            # trusted audio directives only. The platform layer then sends the
+            # voice first and emits text solely when delivery is not confirmed.
+            final_response = _canonicalize_telegram_tts_response(
+                source.platform,
+                final_response,
+                unique_tags,
+                has_voice_directive,
+            )
 ''',
 )
 
