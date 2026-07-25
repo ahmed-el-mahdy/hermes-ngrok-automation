@@ -53,6 +53,7 @@ checks = {
     "delivery_truth_policy": (
         "Never promise a later upload" in system_prompt
         and "invent a helper bot" in system_prompt
+        and "return no final prose" in system_prompt
     ),
 }
 
@@ -65,6 +66,7 @@ source_markers = {
         "HERMES_AUTODELIVER_TTS_MEDIA",
         "HERMES_CANONICALIZE_TELEGRAM_TTS",
         "HERMES_LIVE_MODEL_STATUS",
+        "HERMES_SCAN_TRUSTED_MEDIA_WITH_PATH_DEDUP",
         "HERMES_TRUST_TOOL_TTS_OVER_MODEL_MEDIA",
     ),
     "/opt/hermes/gateway/platforms/base.py": (
@@ -244,12 +246,23 @@ def validate_model_media_regression() -> dict[str, bool]:
             ),
         },
     ]
-    media_tags, has_voice = _collect_auto_append_media_tags(messages)
+    # Reproduce the resumed-session shape that caused the regression: Hermes
+    # passed a history offset equal to this current-turn-only result length.
+    media_tags, has_voice = _collect_auto_append_media_tags(
+        messages,
+        history_offset=len(messages),
+        history_media_paths=set(),
+    )
     canonical = _canonicalize_telegram_tts_response(
         Platform.TELEGRAM,
         str(messages[-1]["content"]),
         media_tags,
         has_voice,
+    )
+    stale_tags, _ = _collect_auto_append_media_tags(
+        messages,
+        history_offset=len(messages),
+        history_media_paths={path},
     )
     return {
         "model_media_regression_tool_path_detected": (
@@ -259,6 +272,7 @@ def validate_model_media_regression() -> dict[str, bool]:
         "model_media_regression_false_claim_removed": (
             canonical == f"[[audio_as_voice]]\nMEDIA:{path}"
         ),
+        "model_media_regression_stale_path_not_redelivered": stale_tags == [],
     }
 
 

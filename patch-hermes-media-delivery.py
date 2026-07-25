@@ -36,7 +36,7 @@ patch_once(
 ''',
     '''    # HERMES_TTS_GATEWAY_AUTODELIVERY_SCHEMA: the gateway collects every
     # successful current-turn TTS artifact and delivers it as native media.
-    "description": "Generate speech audio for the current messaging reply. The gateway automatically attaches every successful current-turn TTS result as native media, including multiple comparison samples. Do not call send_message for the returned local path and do not expose it in prose. You may say the generated audio is attached by the gateway, but never claim Telegram confirmed receipt. Never promise a later upload or invent a helper bot. Voice and provider are centrally configured; do not pass provider_config or invent extra arguments.",
+    "description": "Generate speech audio for the current messaging reply. The gateway automatically attaches every successful current-turn TTS result as native media, including multiple comparison samples. After a successful call, return no final prose: do not announce creation or delivery, name a voice, show a path, provide Telegram instructions, or call send_message. Never promise a later upload or invent a helper bot. Voice and provider are centrally configured; do not pass provider_config or invent extra arguments.",
 ''',
 )
 
@@ -59,6 +59,25 @@ _AUTO_APPEND_MEDIA_TOOL_NAMES = {
     "image_generate",
 }
     ''',
+)
+patch_once(
+    gateway_path,
+    "HERMES_SCAN_TRUSTED_MEDIA_WITH_PATH_DEDUP",
+    '''    # Only trust the slice boundary when the message list still contains the
+    # full history prefix. Otherwise scan everything (compression-safe fallback).
+    if history_offset and len(messages) >= history_offset:
+        new_messages = messages[history_offset:]
+    else:
+        new_messages = messages
+''',
+    '''    # HERMES_SCAN_TRUSTED_MEDIA_WITH_PATH_DEDUP: providers and resumed
+    # sessions do not all return the same message shape. Some return full
+    # history plus the current turn, while others return only current-turn
+    # messages. A numeric history offset can therefore slice away the exact TTS
+    # call/result pair we need. Scan every returned producer-tool message and
+    # use history_media_paths as the authoritative stale-delivery guard.
+    new_messages = messages
+''',
 )
 patch_once(
     gateway_path,
