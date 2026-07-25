@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -60,7 +61,17 @@ source_markers = {
         "HERMES_EDGE_TTS_OUTPUT_PATH_FIX",
         "HERMES_TTS_GATEWAY_AUTODELIVERY_SCHEMA",
     ),
-    "/opt/hermes/gateway/run.py": ("HERMES_AUTODELIVER_TTS_MEDIA",),
+    "/opt/hermes/gateway/run.py": (
+        "HERMES_AUTODELIVER_TTS_MEDIA",
+        "HERMES_LIVE_MODEL_STATUS",
+        "HERMES_TELEGRAM_VOICE_TRUTH",
+    ),
+    "/opt/hermes/gateway/platforms/base.py": (
+        "HERMES_CONFIRMED_TELEGRAM_VOICE_DELIVERY",
+    ),
+    "/opt/hermes/plugins/platforms/telegram/adapter.py": (
+        "HERMES_TELEGRAM_VOICE_FAILURE_IS_FAILURE",
+    ),
     "/opt/hermes/tools/send_message_tool.py": (
         "HERMES_TELEGRAM_VOICE_RETRY",
     ),
@@ -69,6 +80,123 @@ for source_path, markers in source_markers.items():
     source = Path(source_path).read_text(encoding="utf-8")
     for marker in markers:
         checks[f"patch_{marker.lower()}"] = marker in source
+
+
+async def validate_gateway_voice_delivery() -> dict[str, bool]:
+    from gateway.config import Platform, PlatformConfig
+    from gateway.platforms.base import (
+        BasePlatformAdapter,
+        MessageEvent,
+        MessageType,
+        SendResult,
+    )
+    from gateway.session import SessionSource
+
+    test_path = Path("/opt/data/tmp/gateway_delivery_logic_test.ogg")
+    test_path.write_bytes(b"OggS-hermes-delivery-test")
+    false_claim = "MODEL_FALSE_DELIVERY_CLAIM"
+    response = (
+        f"{false_claim}\n"
+        "[[audio_as_voice]]\n"
+        f"MEDIA:{test_path}"
+    )
+
+    class FakeTelegramAdapter(BasePlatformAdapter):
+        def __init__(self, voice_ok: bool):
+            super().__init__(
+                PlatformConfig(enabled=True),
+                Platform.TELEGRAM,
+            )
+            self.voice_ok = voice_ok
+            self.events: list[tuple[str, str]] = []
+
+        async def connect(self):
+            return True
+
+        async def disconnect(self):
+            return None
+
+        async def get_chat_info(self, chat_id):
+            return {"id": chat_id}
+
+        async def send(
+            self,
+            chat_id,
+            content,
+            reply_to=None,
+            metadata=None,
+        ):
+            self.events.append(("text", content))
+            return SendResult(success=True, message_id="text-1")
+
+        async def send_voice(
+            self,
+            chat_id,
+            audio_path,
+            caption=None,
+            reply_to=None,
+            metadata=None,
+            **kwargs,
+        ):
+            self.events.append(("voice", audio_path))
+            return SendResult(
+                success=self.voice_ok,
+                message_id="voice-1" if self.voice_ok else None,
+                error=None if self.voice_ok else "simulated delivery failure",
+            )
+
+        async def send_typing(self, *args, **kwargs):
+            return None
+
+        async def stop_typing(self, *args, **kwargs):
+            return None
+
+    async def run_case(voice_ok: bool) -> list[tuple[str, str]]:
+        adapter = FakeTelegramAdapter(voice_ok)
+
+        async def handler(event):
+            return response
+
+        adapter.set_message_handler(handler)
+        event = MessageEvent(
+            text="voice delivery validation",
+            message_type=MessageType.TEXT,
+            source=SessionSource(
+                platform=Platform.TELEGRAM,
+                chat_id="validation",
+                user_id="owner",
+            ),
+            message_id="validation-1",
+        )
+        await adapter._process_message_background(
+            event,
+            "telegram:validation",
+        )
+        return adapter.events
+
+    try:
+        success_events = await run_case(True)
+        failure_events = await run_case(False)
+        return {
+            "gateway_voice_success_is_voice_only": (
+                len(success_events) == 1
+                and success_events[0][0] == "voice"
+            ),
+            "gateway_voice_failure_reports_failure": (
+                len(failure_events) == 2
+                and failure_events[0][0] == "voice"
+                and failure_events[1][0] == "text"
+            ),
+            "gateway_voice_false_claim_removed": (
+                bool(failure_events)
+                and false_claim not in failure_events[-1][1]
+            ),
+        }
+    finally:
+        test_path.unlink(missing_ok=True)
+
+
+checks.update(asyncio.run(validate_gateway_voice_delivery()))
 
 os.environ["HERMES_SESSION_PLATFORM"] = "telegram"
 from tools.tts_tool import text_to_speech_tool
