@@ -1,17 +1,26 @@
 from pathlib import Path
 
 
-SOURCE_PATH = Path("/opt/hermes/tools/transcription_tools.py")
-PATCH_MARKER = "HERMES_STT_INITIAL_PROMPT"
+def patch_once(path: Path, marker: str, needle: str, replacement: str) -> None:
+    source = path.read_text(encoding="utf-8")
+    if marker in source:
+        return
+    if source.count(needle) != 1:
+        raise RuntimeError(
+            f"{path} changed; refusing to apply unsafe STT patch {marker}"
+        )
+    path.write_text(source.replace(needle, replacement), encoding="utf-8")
 
-source = SOURCE_PATH.read_text(encoding="utf-8")
-if PATCH_MARKER in source:
-    raise SystemExit(0)
 
-needle = '''        transcribe_kwargs = {"beam_size": 5}
+source_path = Path("/opt/hermes/tools/transcription_tools.py")
+
+patch_once(
+    source_path,
+    "HERMES_STT_INITIAL_PROMPT",
+    '''        transcribe_kwargs = {"beam_size": 5}
         if _forced_lang:
-'''
-replacement = '''        _stt_initial_prompt = os.getenv(
+''',
+    '''        _stt_initial_prompt = os.getenv(
             "HERMES_STT_INITIAL_PROMPT",
             "تفريغ دقيق لرسالة صوتية باللهجة المصرية العامية، مع الحفاظ على الكلمات التقنية والأسماء.",
         ).strip()
@@ -38,11 +47,52 @@ replacement = '''        _stt_initial_prompt = os.getenv(
         if _stt_hotwords:
             transcribe_kwargs["hotwords"] = _stt_hotwords
         if _forced_lang:
-'''
+''',
+)
 
-if source.count(needle) != 1:
-    raise RuntimeError(
-        "Hermes local STT implementation changed; refusing to apply an unsafe patch"
+patch_once(
+    source_path,
+    "HERMES_STT_EGYPTIAN_COMMAND_CORRECTIONS",
+    '''logger = logging.getLogger(__name__)
+''',
+    '''logger = logging.getLogger(__name__)
+
+
+def _normalize_egyptian_voice_transcript(transcript: str) -> str:
+    """Repair narrow, observed Whisper confusions in Egyptian voice commands."""
+    # HERMES_STT_EGYPTIAN_COMMAND_CORRECTIONS: these substitutions are gated
+    # by an explicit voice-reply phrase and only target impossible or strongly
+    # implausible strings observed in real Telegram samples. Ordinary Arabic
+    # transcription is returned byte-for-byte unchanged.
+    text = str(transcript or "").strip()
+    if "بصوت" not in text and "فويس" not in text:
+        return text
+
+    replacements = (
+        ("يريد ترد علي بصوت", "يا ريت ترد عليا بصوت"),
+        ("يريد ترد عليا بصوت", "يا ريت ترد عليا بصوت"),
+        ("ترد علي بصوت", "ترد عليا بصوت"),
+        ("وتعرفني متعبسك", "وتعرفني إمكانياتك"),
+        ("وتعرفني بتعبسك", "وتعرفني إمكانياتك"),
+        ("وتعرفني نمتعبسك", "وتعرفني إمكانياتك"),
+        ("وتعرف نمتعب بسك", "وتعرفني إمكانياتك"),
     )
+    for mistaken, corrected in replacements:
+        text = text.replace(mistaken, corrected)
+    return text
+''',
+)
 
-SOURCE_PATH.write_text(source.replace(needle, replacement), encoding="utf-8")
+patch_once(
+    source_path,
+    "HERMES_APPLY_STT_EGYPTIAN_COMMAND_CORRECTIONS",
+    '''        logger.info(
+            "Transcribed %s via local whisper (%s, lang=%s, %.1fs audio)",
+''',
+    '''        # HERMES_APPLY_STT_EGYPTIAN_COMMAND_CORRECTIONS
+        transcript = _normalize_egyptian_voice_transcript(transcript)
+
+        logger.info(
+            "Transcribed %s via local whisper (%s, lang=%s, %.1fs audio)",
+''',
+)

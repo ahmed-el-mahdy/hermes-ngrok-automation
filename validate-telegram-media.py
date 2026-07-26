@@ -54,10 +54,17 @@ checks = {
         "Never promise a later upload" in system_prompt
         and "invent a helper bot" in system_prompt
         and "return no final prose" in system_prompt
+        and "deterministically synthesizes and sends" in system_prompt
+        and "never claim that voice generation" in system_prompt
     ),
 }
 
 source_markers = {
+    "/opt/hermes/tools/transcription_tools.py": (
+        "HERMES_STT_INITIAL_PROMPT",
+        "HERMES_STT_EGYPTIAN_COMMAND_CORRECTIONS",
+        "HERMES_APPLY_STT_EGYPTIAN_COMMAND_CORRECTIONS",
+    ),
     "/opt/hermes/tools/tts_tool.py": (
         "HERMES_EDGE_TTS_OUTPUT_PATH_FIX",
         "HERMES_TTS_GATEWAY_AUTODELIVERY_SCHEMA",
@@ -68,9 +75,13 @@ source_markers = {
         "HERMES_LIVE_MODEL_STATUS",
         "HERMES_SCAN_TRUSTED_MEDIA_WITH_PATH_DEDUP",
         "HERMES_TRUST_TOOL_TTS_OVER_MODEL_MEDIA",
+        "HERMES_IMPORT_EXPLICIT_VOICE_INTENT",
+        "HERMES_TAG_EXPLICIT_VOICE_REPLY",
     ),
     "/opt/hermes/gateway/platforms/base.py": (
         "HERMES_CONFIRMED_TELEGRAM_VOICE_DELIVERY",
+        "HERMES_EXPLICIT_TELEGRAM_VOICE_INTENT",
+        "HERMES_DETERMINISTIC_EXPLICIT_VOICE_REPLY",
     ),
     "/opt/hermes/plugins/platforms/telegram/adapter.py": (
         "HERMES_TELEGRAM_VOICE_FAILURE_IS_FAILURE",
@@ -85,6 +96,60 @@ for source_path, markers in source_markers.items():
         checks[f"patch_{marker.lower()}"] = marker in source
 
 
+from gateway.config import Platform
+from gateway.platforms.base import _explicit_voice_reply_requested
+from tools.transcription_tools import _normalize_egyptian_voice_transcript
+
+observed_transcript = (
+    "صباح الفل يريد ترد علي بصوت وتعرفني متعبسك"
+)
+corrected_transcript = (
+    "صباح الفل يا ريت ترد عليا بصوت وتعرفني إمكانياتك"
+)
+checks.update(
+    {
+        "stt_observed_egyptian_command_corrected": (
+            _normalize_egyptian_voice_transcript(observed_transcript)
+            == corrected_transcript
+        ),
+        "stt_unrelated_text_preserved": (
+            _normalize_egyptian_voice_transcript(
+                "عايز أعرف حالة السيرفر النهارده"
+            )
+            == "عايز أعرف حالة السيرفر النهارده"
+        ),
+        "explicit_voice_intent_from_observed_stt": (
+            _explicit_voice_reply_requested(
+                observed_transcript,
+                Platform.TELEGRAM,
+            )
+            is True
+        ),
+        "explicit_voice_intent_from_typed_request": (
+            _explicit_voice_reply_requested(
+                "لو سمحت رد عليا بصوت",
+                Platform.TELEGRAM,
+            )
+            is True
+        ),
+        "explicit_voice_intent_respects_negation": (
+            _explicit_voice_reply_requested(
+                "مش عايزك ترد عليا بصوت",
+                Platform.TELEGRAM,
+            )
+            is False
+        ),
+        "explicit_voice_intent_telegram_only": (
+            _explicit_voice_reply_requested(
+                "reply to me by voice",
+                Platform.DISCORD,
+            )
+            is False
+        ),
+    }
+)
+
+
 async def validate_gateway_voice_delivery() -> dict[str, bool]:
     from gateway.config import Platform, PlatformConfig
     from gateway.platforms.base import (
@@ -97,6 +162,10 @@ async def validate_gateway_voice_delivery() -> dict[str, bool]:
 
     test_path = Path("/opt/data/tmp/gateway_delivery_logic_test.ogg")
     test_path.write_bytes(b"OggS-hermes-delivery-test")
+    explicit_path = Path(
+        "/opt/data/tmp/gateway_explicit_voice_logic_test.ogg"
+    )
+    explicit_path.write_bytes(b"OggS-hermes-explicit-voice-test")
     false_claim = "MODEL_FALSE_DELIVERY_CLAIM"
     response = (
         f"{false_claim}\n"
@@ -177,9 +246,51 @@ async def validate_gateway_voice_delivery() -> dict[str, bool]:
         )
         return adapter.events
 
+    async def run_explicit_case() -> list[tuple[str, str]]:
+        import tools.tts_tool as tts_module
+
+        adapter = FakeTelegramAdapter(True)
+
+        async def handler(event):
+            return "ده رد صوتي مؤكد."
+
+        adapter.set_message_handler(handler)
+        event = MessageEvent(
+            text="لو سمحت رد عليا بصوت",
+            message_type=MessageType.TEXT,
+            source=SessionSource(
+                platform=Platform.TELEGRAM,
+                chat_id="validation",
+                user_id="owner",
+            ),
+            message_id="validation-explicit-voice",
+        )
+        event._gateway_explicit_voice_reply = True
+
+        original_check = tts_module.check_tts_requirements
+        original_tts = tts_module.text_to_speech_tool
+        try:
+            tts_module.check_tts_requirements = lambda: True
+            tts_module.text_to_speech_tool = lambda **kwargs: json.dumps(
+                {
+                    "success": True,
+                    "file_path": str(explicit_path),
+                    "voice_compatible": True,
+                }
+            )
+            await adapter._process_message_background(
+                event,
+                "telegram:validation-explicit-voice",
+            )
+        finally:
+            tts_module.check_tts_requirements = original_check
+            tts_module.text_to_speech_tool = original_tts
+        return adapter.events
+
     try:
         success_events = await run_case(True)
         failure_events = await run_case(False)
+        explicit_events = await run_explicit_case()
         return {
             "gateway_voice_success_is_voice_only": (
                 len(success_events) == 1
@@ -194,9 +305,14 @@ async def validate_gateway_voice_delivery() -> dict[str, bool]:
                 bool(failure_events)
                 and false_claim not in failure_events[-1][1]
             ),
+            "gateway_explicit_voice_request_is_deterministic": (
+                len(explicit_events) == 1
+                and explicit_events[0][0] == "voice"
+            ),
         }
     finally:
         test_path.unlink(missing_ok=True)
+        explicit_path.unlink(missing_ok=True)
 
 
 checks.update(asyncio.run(validate_gateway_voice_delivery()))

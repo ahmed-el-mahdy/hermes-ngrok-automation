@@ -313,7 +313,107 @@ patch_once(
 ''',
 )
 
+patch_once(
+    gateway_path,
+    "HERMES_IMPORT_EXPLICIT_VOICE_INTENT",
+    '''    MessageEvent,
+    MessageType,
+    _prefix_within_utf16_limit,
+''',
+    '''    MessageEvent,
+    MessageType,
+    # HERMES_IMPORT_EXPLICIT_VOICE_INTENT
+    _explicit_voice_reply_requested,
+    _prefix_within_utf16_limit,
+''',
+)
+
+patch_once(
+    gateway_path,
+    "HERMES_TAG_EXPLICIT_VOICE_REPLY",
+    '''        if "@" in message_text:
+''',
+    '''        # HERMES_TAG_EXPLICIT_VOICE_REPLY: keep the LLM focused on the
+        # substantive answer while the gateway owns TTS and Telegram delivery.
+        # This covers typed requests and imperfect STT transcripts.
+        if _explicit_voice_reply_requested(message_text, source.platform):
+            setattr(event, "_gateway_explicit_voice_reply", True)
+            _voice_delivery_note = (
+                "[Trusted gateway delivery note: The user explicitly requested "
+                "a Telegram voice reply. Answer the substantive request normally "
+                "in the user's language. Do not discuss voice capability or "
+                "refuse. The gateway will synthesize and deliver the final answer "
+                "as a Telegram voice note if no TTS artifact is produced. Only "
+                "call text_to_speech when the user requested multiple distinct "
+                "voice samples; never call send_message for the voice reply.]"
+            )
+            message_text = f"{_voice_delivery_note}\\n\\n{message_text}"
+
+        if "@" in message_text:
+''',
+)
+
 base_adapter_path = Path("/opt/hermes/gateway/platforms/base.py")
+patch_once(
+    base_adapter_path,
+    "HERMES_EXPLICIT_TELEGRAM_VOICE_INTENT",
+    r'''def _mark_notify_metadata(metadata: dict | None) -> dict:
+    """Clone metadata and mark a user-visible reply as notify-worthy."""
+    notify_metadata = dict(metadata) if metadata else {}
+    notify_metadata["notify"] = True
+    return notify_metadata
+
+
+def _reply_anchor_for_event(event) -> str | None:
+''',
+    r'''def _mark_notify_metadata(metadata: dict | None) -> dict:
+    """Clone metadata and mark a user-visible reply as notify-worthy."""
+    notify_metadata = dict(metadata) if metadata else {}
+    notify_metadata["notify"] = True
+    return notify_metadata
+
+
+def _explicit_voice_reply_requested(text: str, platform: object) -> bool:
+    """Recognize an explicit Telegram voice-reply request without an LLM."""
+    # HERMES_EXPLICIT_TELEGRAM_VOICE_INTENT: speech recognition can preserve
+    # "reply to me by voice" while missing surrounding words. Keep this
+    # decision deterministic so TTS does not depend on the selected model's
+    # tool use. Negation wins to avoid surprising audio replies.
+    if _platform_name(platform) != "telegram":
+        return False
+
+    normalized = str(text or "").lower().translate(
+        str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ى": "ي"})
+    )
+    normalized = re.sub(r"[\u064b-\u065f\u0670]", "", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    if not normalized:
+        return False
+
+    negative_patterns = (
+        r"(?:مش|لا|بدون|من غير|ما\s*تردش|ماتردش).{0,45}(?:صوت|فويس)",
+        r"\b(?:do not|don't|dont|without|no)\b.{0,45}\b(?:voice|audio)\b",
+    )
+    if any(re.search(pattern, normalized) for pattern in negative_patterns):
+        return False
+
+    positive_patterns = (
+        r"(?:ترد|رد|جاوب|تجاوب|كلمني|اتكلم|تكلم|قول|ابعت|ابعث|ارسل)"
+        r".{0,35}(?:علي|عليا)?\s*(?:ب?صوت|فويس)",
+        r"(?:بصوت|صوتي|فويس).{0,35}"
+        r"(?:ترد|رد|جاوب|تجاوب|كلمني|اتكلم|تكلم|قول|ابعت|ابعث|ارسل)",
+        r"\b(?:reply|respond|answer|speak|send)\b.{0,45}"
+        r"\b(?:voice|audio)\b",
+        r"\b(?:voice|audio)\b.{0,45}"
+        r"\b(?:reply|respond|answer|speak|send)\b",
+    )
+    return any(re.search(pattern, normalized) for pattern in positive_patterns)
+
+
+def _reply_anchor_for_event(event) -> str | None:
+''',
+)
+
 patch_once(
     base_adapter_path,
     "HERMES_CONFIRMED_TELEGRAM_VOICE_DELIVERY",
@@ -390,6 +490,36 @@ patch_once(
                             )
 
                 # Auto-TTS: if voice message, generate audio FIRST (before sending text)
+''',
+)
+
+patch_once(
+    base_adapter_path,
+    "HERMES_DETERMINISTIC_EXPLICIT_VOICE_REPLY",
+    '''                _tts_path = None
+                if (self._should_auto_tts_for_chat(event.source.chat_id)
+                        and event.message_type == MessageType.VOICE
+                        and text_content
+                        and not media_files):
+''',
+    '''                _tts_path = None
+                # HERMES_DETERMINISTIC_EXPLICIT_VOICE_REPLY: an explicit
+                # request is sufficient even when auto-TTS is globally off.
+                # The trusted marker is set after STT on this MessageEvent.
+                _explicit_voice_reply = bool(
+                    getattr(event, "_gateway_explicit_voice_reply", False)
+                )
+                if (
+                    (
+                        _explicit_voice_reply
+                        or (
+                            self._should_auto_tts_for_chat(event.source.chat_id)
+                            and event.message_type == MessageType.VOICE
+                        )
+                    )
+                    and text_content
+                    and not media_files
+                ):
 ''',
 )
 
