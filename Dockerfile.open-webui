@@ -2,6 +2,13 @@ FROM ghcr.io/open-webui/open-webui:v0.10.2
 
 USER root
 
+COPY patch-open-webui-mobile.py /tmp/patch-open-webui-mobile.py
+COPY validate-open-webui-mobile.py /usr/local/bin/validate-open-webui-mobile
+
+RUN python /tmp/patch-open-webui-mobile.py \
+    && rm /tmp/patch-open-webui-mobile.py \
+    && chmod 0755 /usr/local/bin/validate-open-webui-mobile
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends nodejs npm \
     && npm cache clean --force \

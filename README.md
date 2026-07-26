@@ -269,6 +269,13 @@ Open WebUI is an installable Progressive Web App. Open the same ngrok URL on the
 
 Use the installed Open WebUI app for the full dashboard, long chats, files, and model selection. Use Telegram for quick requests, voice, photos, scheduled alerts, and notifications. The two interfaces complement each other; Telegram does not need to replace the portal.
 
+The custom Open WebUI image normalizes mobile/PWA requests by removing the
+empty assistant placeholder used for UI loading before the provider sees the
+conversation. Failed requests are persisted as completed errors instead of
+reopening as an endless loading skeleton. Run
+`docker exec hermes-open-webui validate-open-webui-mobile` after an Open WebUI
+upgrade or mobile-chat repair.
+
 Official references: [Open WebUI getting started](https://docs.openwebui.com/getting-started/) and [phone/PWA guide](https://docs.openwebui.com/ecosystem/computer/phone-and-remote/phone-app/).
 
 ## Telegram
