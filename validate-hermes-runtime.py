@@ -56,6 +56,7 @@ COMMANDS = (
     "file",
     "hermes",
     "hermes-admin",
+    "hermes-personal-memory",
     "hermes-smoke-test",
     "jq",
     "libreoffice",
@@ -68,6 +69,7 @@ COMMANDS = (
     "uv",
     "validate-vision",
     "validate-telegram-media",
+    "validate-personal-context",
 )
 MODULES = (
     "bs4",
@@ -296,6 +298,17 @@ checks["gateway_timeout"] = config.get("agent", {}).get("gateway_timeout") == 30
 checks["runtime_policy"] = "[HERMES_RUNTIME_POLICY]" in str(
     config.get("agent", {}).get("system_prompt") or ""
 )
+checks["personal_context_policy"] = (
+    "private Personal-project archive"
+    in str(config.get("agent", {}).get("system_prompt") or "")
+)
+memory = config.get("memory") or {}
+checks["personal_memory_limits"] = (
+    memory.get("memory_enabled") is True
+    and memory.get("user_profile_enabled") is True
+    and memory.get("memory_char_limit") == 5000
+    and memory.get("user_char_limit") == 8000
+)
 checks["general_agent_identity"] = "general-purpose personal assistant" in str(
     config.get("agent", {}).get("system_prompt") or ""
 )
@@ -339,6 +352,16 @@ checks["tts_delivery_patch"] = all(
         ),
     )
 )
+checks["personal_context_patch"] = (
+    "HERMES_AUTO_PERSONAL_CONTEXT"
+    in Path("/opt/hermes/gateway/run.py").read_text(encoding="utf-8")
+)
+personal_root = Path("/opt/data/personal_memory")
+if personal_root.exists():
+    personal_validation = json.loads(
+        run("hermes-personal-memory", "validate", timeout=30)
+    )
+    checks["personal_context_index"] = personal_validation.get("passed") is True
 if configured("TELEGRAM_BOT_TOKEN"):
     checks["telegram_home_channel"] = bool(
         str(config.get("TELEGRAM_HOME_CHANNEL") or "").strip()

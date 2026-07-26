@@ -97,6 +97,7 @@ docker compose -f ~/hermes-ngrok/docker-compose.yml logs -f
 | Host path or volume | Contents |
 | --- | --- |
 | `~/.hermes` | Hermes configuration, memory, sessions, and provider routing |
+| `~/.hermes/personal_memory` | Private local Personal-project archive and search index |
 | `~/hermes_workspace` | Tool, specialist, workflow, and acceptance artifacts |
 | `~/hermes-ngrok/logs` | Hermes logs |
 | `open-webui-data` | Open WebUI users, chats, models, tools, and prompts |
@@ -203,6 +204,37 @@ Changes selected with `hermes-admin use` apply to new sessions.
 ## Autonomous Runtime
 
 `configure-hermes-runtime.sh` fixes persistent cache ownership, applies the resilient cloud/local failover policy, and installs a shell profile that exposes `hermes`, `hermes-admin`, `pip`, and `uv` to agent terminal sessions. Python packages installed with `pip` persist under `/opt/data/python-packages`.
+
+### Private personal context
+
+Hermes can use a local-only personal archive without sending the entire archive
+to every model call. A concise `USER.md` and `MEMORY.md` load with the session,
+while SQLite FTS5 retrieves only the relevant health, legal, career, finance,
+family, or preference evidence for the current question.
+
+Private exports belong under `personal-memory/private/`, which is excluded from
+Git and the Docker build context. Stage that directory separately on the VM as
+`~/hermes-personal-import`, then run:
+
+```bash
+docker compose --env-file .env -f docker-compose.yml build hermes-agent
+bash configure-personal-memory.sh
+HERMES_RUNTIME_SKIP_RESTART=1 bash configure-hermes-runtime.sh
+docker compose --env-file .env -f docker-compose.yml up -d --force-recreate hermes-agent
+```
+
+Verify local retrieval without exposing private content to a cloud API:
+
+```bash
+docker exec -u 10000 hermes-agent hermes-personal-memory validate
+docker exec -u 10000 hermes-agent \
+  hermes-personal-memory search "ما معلوماتك عني صحيا"
+```
+
+The gateway injects evidence only for matching personal questions. Curated
+dossiers outrank raw chat turns, stale facts remain marked `historical` or
+`needs_confirmation`, and consequential medical or legal advice requires
+current facts.
 
 The image includes:
 

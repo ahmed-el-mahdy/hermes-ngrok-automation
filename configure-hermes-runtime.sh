@@ -73,10 +73,13 @@ docker exec -u root hermes-agent sh -lc '
 
   ln -sf /opt/hermes/.venv/bin/hermes /opt/data/.local/bin/hermes
   ln -sf /usr/local/bin/hermes-admin /opt/data/.local/bin/hermes-admin
+  ln -sf /usr/local/bin/hermes-personal-memory \
+    /opt/data/.local/bin/hermes-personal-memory
   ln -sf /usr/local/bin/hermes-smoke-test /opt/data/.local/bin/hermes-smoke-test
   chown -h 10000:10000 \
     /opt/data/.local/bin/hermes \
     /opt/data/.local/bin/hermes-admin \
+    /opt/data/.local/bin/hermes-personal-memory \
     /opt/data/.local/bin/hermes-smoke-test
 
   cat > /opt/data/home/.hermes_env <<"EOF"

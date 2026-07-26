@@ -42,15 +42,25 @@ RUN npm install --global --omit=dev "pptxgenjs@4.0.1"
 
 COPY patch-hermes-stt.py /tmp/patch-hermes-stt.py
 COPY patch-hermes-media-delivery.py /tmp/patch-hermes-media-delivery.py
+COPY patch-hermes-personal-context.py /tmp/patch-hermes-personal-context.py
+COPY personal-context-tool.py /opt/hermes/tools/personal_context_tool.py
 RUN /opt/hermes/.venv/bin/python /tmp/patch-hermes-stt.py \
     && /opt/hermes/.venv/bin/python /tmp/patch-hermes-media-delivery.py \
-    && rm /tmp/patch-hermes-stt.py /tmp/patch-hermes-media-delivery.py \
+    && /opt/hermes/.venv/bin/python /tmp/patch-hermes-personal-context.py \
+    && rm \
+        /tmp/patch-hermes-stt.py \
+        /tmp/patch-hermes-media-delivery.py \
+        /tmp/patch-hermes-personal-context.py \
     && ln -sf /opt/hermes/.venv/bin/hermes /usr/local/bin/hermes \
     && ln -sf /opt/hermes/.venv/bin/python /usr/local/bin/hermes-python
 
+RUN install -d -m 0755 /opt/hermes/skills/personal-context
+COPY personal-memory/SKILL.md /opt/hermes/skills/personal-context/SKILL.md
+COPY personal-context-tool.py /usr/local/bin/hermes-personal-memory
 COPY hermes-admin.py /usr/local/bin/hermes-admin
 COPY hermes-smoke-test.sh /usr/local/bin/hermes-smoke-test
 COPY validate-hermes-runtime.py /usr/local/bin/validate-hermes-runtime
+COPY validate-personal-context.py /usr/local/bin/validate-personal-context
 COPY validate-telegram.py /usr/local/bin/validate-telegram
 COPY validate-model-routes.py /usr/local/bin/validate-model-routes
 COPY validate-vision.py /usr/local/bin/validate-vision
@@ -58,8 +68,10 @@ COPY validate-telegram-media.py /usr/local/bin/validate-telegram-media
 COPY ollama-openai-bridge.py /opt/hermes-extensions/ollama-openai-bridge.py
 RUN chmod 0755 \
     /usr/local/bin/hermes-admin \
+    /usr/local/bin/hermes-personal-memory \
     /usr/local/bin/hermes-smoke-test \
     /usr/local/bin/validate-hermes-runtime \
+    /usr/local/bin/validate-personal-context \
     /usr/local/bin/validate-telegram \
     /usr/local/bin/validate-model-routes \
     /usr/local/bin/validate-vision \
@@ -67,8 +79,10 @@ RUN chmod 0755 \
     /opt/hermes-extensions/ollama-openai-bridge.py \
     && sed -i 's/\r$//' \
     /usr/local/bin/hermes-admin \
+    /usr/local/bin/hermes-personal-memory \
     /usr/local/bin/hermes-smoke-test \
     /usr/local/bin/validate-hermes-runtime \
+    /usr/local/bin/validate-personal-context \
     /usr/local/bin/validate-telegram \
     /usr/local/bin/validate-model-routes \
     /usr/local/bin/validate-vision \

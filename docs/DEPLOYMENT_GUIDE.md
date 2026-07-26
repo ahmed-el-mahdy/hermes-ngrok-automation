@@ -12,6 +12,34 @@ The repository currently pins Open WebUI `v0.10.2`. Review the official release 
 
 The public URL must load Open WebUI directly. A browser-native username/password popup means ngrok Basic Auth or an edge traffic policy is still enabled and must be removed.
 
+## Private Personal-project Memory
+
+Never commit the ChatGPT Personal-project export. The repository ignores
+`personal-memory/private/`, and `.dockerignore` prevents that directory from
+entering an image layer. Upload it directly to `~/hermes-personal-import` with
+directory mode `0700` and file mode `0600`.
+
+`configure-personal-memory.sh` normalizes accidental Arabic mojibake, redacts
+secret-like values, builds a local SQLite FTS5 index, backs up the current
+Hermes core memory, replaces it with the curated profile, and validates the
+import. The full archive is mounted from `~/.hermes/personal_memory`; it is not
+stored in Git or baked into the Docker image.
+
+```bash
+cd ~/hermes-ngrok
+docker compose --env-file .env -f docker-compose.yml build hermes-agent
+bash configure-personal-memory.sh
+HERMES_RUNTIME_SKIP_RESTART=1 bash configure-hermes-runtime.sh
+docker compose --env-file .env -f docker-compose.yml up -d --force-recreate hermes-agent
+docker exec -u 10000 hermes-agent hermes-personal-memory validate
+```
+
+The gateway searches the local index automatically for personal profile,
+health, legal, career, family, finance, preferences, and prior-decision
+questions. Only matched excerpts enter the active request. Retrieved text is
+labeled as historical user data rather than instructions, and curated dossiers
+rank above raw chat text.
+
 ## Deploy the Agent Catalog
 
 Copy the repository automation files to the VM, then run them from the project root. Supply portal credentials as environment variables rather than embedding them in files.
