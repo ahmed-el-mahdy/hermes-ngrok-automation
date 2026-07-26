@@ -344,8 +344,25 @@ def dossier_category(path: Path) -> str:
 
 def build_index(root: Path, db_path: Path) -> dict:
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    manifest_path = root / "source_chats" / "manifest.json"
+    manifest = (
+        normalize_value(json.loads(manifest_path.read_text(encoding="utf-8")))
+        if manifest_path.exists()
+        else {}
+    )
+    manifest_chats = [
+        chat for chat in (manifest.get("chats") or []) if isinstance(chat, dict)
+    ]
+    source_chat_count = len(manifest_chats)
+    source_turn_count = sum(
+        int(chat.get("turn_count") or 0) for chat in manifest_chats
+    )
+    attachment_reference_count = sum(
+        int(chat.get("attachment_count") or 0) for chat in manifest_chats
+    )
+    dossier_paths = sorted((root / "dossiers").glob("*.md"))
     chunks = []
-    for path in sorted((root / "dossiers").glob("*.md")):
+    for path in dossier_paths:
         chunks.extend(split_markdown(path, dossier_category(path)))
     chunks.extend(iter_chat_chunks(root))
     if not chunks:
@@ -403,6 +420,13 @@ def build_index(root: Path, db_path: Path) -> dict:
                     datetime.now(timezone.utc).isoformat(),
                 ),
                 ("chunk_count", str(len(chunks))),
+                ("source_chat_count", str(source_chat_count)),
+                ("source_turn_count", str(source_turn_count)),
+                (
+                    "attachment_reference_count",
+                    str(attachment_reference_count),
+                ),
+                ("dossier_count", str(len(dossier_paths))),
                 ("schema_version", "1"),
             ),
         )
@@ -418,38 +442,43 @@ def build_index(root: Path, db_path: Path) -> dict:
     return {
         "database": str(db_path),
         "chunk_count": len(chunks),
+        "source_chat_count": source_chat_count,
+        "source_turn_count": source_turn_count,
+        "attachment_reference_count": attachment_reference_count,
+        "dossier_count": len(dossier_paths),
         "categories": categories,
     }
 
 
+def detect_categories(query: str) -> list[str]:
+    categories = [
+        category
+        for category, terms in CATEGORY_TERMS.items()
+        if re.search(terms, query, re.IGNORECASE)
+    ]
+    specific = [
+        category
+        for category in categories
+        if category not in {"profile", "preferences"}
+    ]
+    if specific:
+        return specific
+    return categories or ["profile"]
+
+
 def detect_category(query: str) -> str:
-    for category, terms in CATEGORY_TERMS.items():
-        if re.search(terms, query, re.IGNORECASE):
-            return category
-    return "profile"
+    """Return the first category for backwards-compatible callers."""
+    return detect_categories(query)[0]
 
 
-def fts_query(query: str, category: str = "") -> str:
-    words = list(CATEGORY_EXPANSIONS.get(category, ()))
-    for word in WORD_RE.findall(query):
-        if len(word) < 2 or word in STOP_WORDS:
-            continue
-        cleaned = word.replace('"', "")
-        if cleaned and cleaned not in words:
-            words.append(cleaned)
-    return " OR ".join(f'"{word}"' for word in words[:32])
-
-
-def search(
+def _search_category(
     query: str,
     *,
-    db_path: Path = DEFAULT_DB,
-    limit: int = 6,
-    max_chars: int = 7000,
+    category: str,
+    db_path: Path,
+    limit: int,
+    max_chars: int,
 ) -> list[dict]:
-    if not db_path.exists():
-        return []
-    category = detect_category(query)
     expression = fts_query(fix_mojibake(query), category)
     if not expression:
         return []
@@ -468,7 +497,7 @@ def search(
                 rank
             LIMIT ?
             """,
-            (expression, category, max(limit * 3, limit)),
+            (expression, category, max(limit * 4, limit)),
         ).fetchall()
     except sqlite3.OperationalError:
         return []
@@ -504,6 +533,54 @@ def search(
         if len(results) >= limit:
             break
     return results
+
+
+def fts_query(query: str, category: str = "") -> str:
+    words = list(CATEGORY_EXPANSIONS.get(category, ()))
+    for word in WORD_RE.findall(query):
+        if len(word) < 2 or word in STOP_WORDS:
+            continue
+        cleaned = word.replace('"', "")
+        if cleaned and cleaned not in words:
+            words.append(cleaned)
+    return " OR ".join(f'"{word}"' for word in words[:32])
+
+
+def search(
+    query: str,
+    *,
+    db_path: Path = DEFAULT_DB,
+    limit: int = 6,
+    max_chars: int = 7000,
+) -> list[dict]:
+    if not db_path.exists():
+        return []
+    categories = detect_categories(fix_mojibake(query))
+    if len(categories) == 1:
+        return _search_category(
+            query,
+            category=categories[0],
+            db_path=db_path,
+            limit=limit,
+            max_chars=max_chars,
+        )
+
+    per_category_limit = max(2, limit // len(categories))
+    per_category_chars = max(1200, max_chars // len(categories))
+    results = []
+    for category, terms in CATEGORY_TERMS.items():
+        if category not in categories:
+            continue
+        results.extend(
+            _search_category(
+                query,
+                category=category,
+                db_path=db_path,
+                limit=per_category_limit,
+                max_chars=per_category_chars,
+            )
+        )
+    return results[:limit]
 
 
 def should_retrieve_personal_context(query: str) -> bool:
@@ -596,6 +673,11 @@ def validate(root: Path, db_path: Path) -> dict:
         errors.append("personal context database is missing")
     elif int(database_stats.get("metadata", {}).get("chunk_count", "0")) < 50:
         errors.append("personal context database contains too few chunks")
+    metadata = database_stats.get("metadata", {})
+    if metadata.get("source_chat_count") not in {None, "5"}:
+        errors.append("personal context database does not contain all 5 chats")
+    if metadata.get("source_turn_count") not in {None, "99"}:
+        errors.append("personal context database does not contain all 99 turns")
     for name, maximum in (("USER.md", 8000), ("MEMORY.md", 5000)):
         path = root / "core" / name
         if not path.exists():

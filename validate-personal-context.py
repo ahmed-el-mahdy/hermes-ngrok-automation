@@ -40,6 +40,12 @@ CASES = (
         "local_terms": ("02-career-and-technical.md", "DevOps", "Azure"),
         "answer_terms": ("DevOps", "Azure", "Kubernetes", "Terraform"),
     },
+    {
+        "name": "combined",
+        "prompt": "ما معلوماتك عني صحيا وايه وضعي القانوني؟",
+        "local_terms": ("03-health.md", "04-legal.md", "Vitamin D", "979"),
+        "answer_terms": ("فيتامين", "Vitamin", "979", "الخبير"),
+    },
 )
 
 BLANKET_REFUSALS = (

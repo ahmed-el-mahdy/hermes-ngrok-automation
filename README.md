@@ -234,7 +234,10 @@ docker exec -u 10000 hermes-agent \
 The gateway injects evidence only for matching personal questions. Curated
 dossiers outrank raw chat turns, stale facts remain marked `historical` or
 `needs_confirmation`, and consequential medical or legal advice requires
-current facts.
+current facts. The full exported chat text remains searchable as the detail
+layer, with user-authored turns ranked above old assistant answers. Multi-domain
+questions retrieve a balanced set from every matching dossier instead of
+letting the first detected topic hide the others.
 
 The image includes:
 

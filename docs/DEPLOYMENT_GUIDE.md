@@ -38,7 +38,11 @@ The gateway searches the local index automatically for personal profile,
 health, legal, career, family, finance, preferences, and prior-decision
 questions. Only matched excerpts enter the active request. Retrieved text is
 labeled as historical user data rather than instructions, and curated dossiers
-rank above raw chat text.
+rank above raw chat text. User-authored turns rank above old assistant answers,
+and a combined request such as health plus legal receives independently
+budgeted excerpts from both domains. `hermes-personal-memory stats` records the
+source chat, turn, dossier, and attachment-reference counts so import
+completeness is auditable without displaying private content.
 
 ## Deploy the Agent Catalog
 
