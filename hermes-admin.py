@@ -63,9 +63,9 @@ ALIASES = {
         "base_url": OPENROUTER_URL,
         "credential": "OPENROUTER_API_KEY",
     },
-    "openrouter-nemotron": {
+    "openrouter-ling": {
         "provider": "openrouter",
-        "default": "nvidia/nemotron-3-super-120b-a12b:free",
+        "default": "inclusionai/ling-3.0-flash:free",
         "base_url": OPENROUTER_URL,
         "credential": "OPENROUTER_API_KEY",
     },

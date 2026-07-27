@@ -21,7 +21,8 @@ OLLAMA_CLOUD_URL = "https://ollama.com/v1"
 OLLAMA_CLOUD_MODEL = "gpt-oss:20b"
 LOCAL_MODEL = "qwen3-4b-gpu:latest"
 NARA_RECOVERY_MODEL = "laguna-s-2.1"
-OPENROUTER_FREE_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
+OPENROUTER_FREE_MODEL = "inclusionai/ling-3.0-flash:free"
+OPENROUTER_SECONDARY_MODEL = "openrouter/free"
 
 
 def configured_names() -> set[str]:
@@ -215,7 +216,7 @@ if has_openrouter:
     fallbacks.append(
         {
             "provider": "openrouter",
-            "model": "openrouter/free",
+            "model": OPENROUTER_SECONDARY_MODEL,
             "base_url": OPENROUTER_URL,
         }
     )
@@ -275,8 +276,8 @@ delegation_fallback_names = []
 if has_openrouter:
     delegation_fallback_names.extend(
         [
-            "the independent OpenRouter Nemotron route",
-            "the OpenRouter free router",
+            "the OpenRouter Ling 3.0 Flash free route",
+            "the OpenRouter free capability router",
         ]
     )
 delegation_fallback_names.append("the local GPU Qwen route")

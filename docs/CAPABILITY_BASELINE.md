@@ -1,6 +1,6 @@
 # Hermes Capability Baseline
 
-Validated on 2026-07-23 against the running workstation VM.
+Validated on 2026-07-26 against the running workstation VM.
 
 ## Core Platform
 
@@ -53,13 +53,13 @@ remain subject to Hermes security auditing before use.
 
 ## Model Routing
 
-- Primary cloud route: NaraRouter `mistral-large`
-- Cloud fallbacks: Ollama Cloud `gpt-oss:20b`, then OpenRouter Nemotron
+- Primary cloud route: Ollama Cloud `gpt-oss:20b`
+- Cloud fallbacks: OpenRouter `Ling 3.0 Flash`, then `openrouter/free`
 - Fourth route: local `qwen3-4b-gpu:latest` through the private Ollama bridge
-- Recovery routes: NaraRouter `laguna-s-2.1`, OpenRouter free router, then Gemini
+- Final recovery route: Gemini; NaraRouter routes are inserted only when their
+  independent health gate passes
 - Auxiliary tasks: automatic routing through the same resilient chain
-- Delegated workers: pinned NaraRouter `mistral-large` primary with inherited
-  quota-aware fallbacks; local Qwen primary when NaraRouter is unavailable
+- Delegated workers: automatic routing with the same quota-aware fallbacks
 - Delegation guard: one child at a time, 20 iterations, ten-minute hard limit
 - Vision route: NaraRouter `mistral-medium-3-5` first, direct Gemini 2.5 Flash
   fallback; never inherit the text-only NaraRouter `mistral-large` chat model
@@ -76,12 +76,19 @@ tool calls, without exposing another host port.
 
 ## Acceptance Evidence
 
-- Hermes runtime smoke test: 80 of 80 checks passed with live web validation,
+- Hermes runtime smoke test: 100 of 100 checks passed with live web validation,
   including the quota report, PowerPoint create/extract/render pipeline, and the
   default Telegram delivery target
+- Runtime configuration validation: 99 of 99 checks passed
 - Telegram live validation: 3 of 3 checks passed
 - Open WebUI model catalog: 11 of 11 models returned successful responses
-- Independent model routes: 4 of 4 checks passed
+- Independent model routes: 7 of 7 checks passed, including primary gateway,
+  Ollama Cloud, both OpenRouter routes, local GPU residency, local tool use, and
+  local reasoning suppression
+- Open WebUI resources: five reviewed lazy-loaded skills and one
+  non-sensitive system-guide knowledge base with three Markdown files
+- Private personal, health, and legal records remain in Hermes' local indexed
+  memory rather than the Open WebUI knowledge store
 - Controlled HTTP 429 recovery: passed through local GPU Qwen with the original
   configuration restored automatically
 - Controlled delegated-worker HTTP 429 recovery: passed after observing both

@@ -25,6 +25,23 @@ Hermes core memory, replaces it with the curated profile, and validates the
 import. The full archive is mounted from `~/.hermes/personal_memory`; it is not
 stored in Git or baked into the Docker image.
 
+Put original attachments under
+`personal-memory/private/attachments/<chat-slug>/`. The routine import is
+Markdown-first and runs `hermes-personal-ocr --documents-only` before
+normalization and indexing. Existing Markdown is indexed directly, while text,
+DOCX, and PDF extraction avoids scanning every image. Run local Tesseract OCR
+only for an attachment that is actually needed:
+
+```bash
+docker exec -u 10000 hermes-agent \
+  hermes-personal-ocr --source health-assistant/report.jpg
+docker exec -u 10000 hermes-agent hermes-personal-memory build
+```
+
+Selective OCR uses local Tesseract `ara+eng`, ffmpeg, and Poppler only.
+Extracted text is stored under `attachment_text/` with confidence and
+verification warnings; no attachment is sent to a cloud OCR or LLM service.
+
 ```bash
 cd ~/hermes-ngrok
 docker compose --env-file .env -f docker-compose.yml build hermes-agent
@@ -37,16 +54,28 @@ docker exec -u 10000 hermes-agent hermes-personal-memory validate
 The gateway searches the local index automatically for personal profile,
 health, legal, career, family, finance, preferences, and prior-decision
 questions. Only matched excerpts enter the active request. Retrieved text is
-labeled as historical user data rather than instructions, and curated dossiers
-rank above raw chat text. User-authored turns rank above old assistant answers,
-and a combined request such as health plus legal receives independently
-budgeted excerpts from both domains. `hermes-personal-memory stats` records the
-source chat, turn, dossier, and attachment-reference counts so import
+labeled as historical user data rather than instructions. Curated dossiers
+rank above attachment extracts, attachment extracts rank above raw chat text,
+and user-authored turns rank above old assistant answers. A combined request
+such as health plus legal receives independently budgeted excerpts from both
+domains. `hermes-personal-memory stats` records the source chat, turn, dossier,
+attachment-reference, attachment-binary, and attachment-text counts so import
 completeness is auditable without displaying private content.
 
 ## Deploy the Agent Catalog
 
 Copy the repository automation files to the VM, then run them from the project root. Supply portal credentials as environment variables rather than embedding them in files.
+
+Apply the reviewed Hermes skill profile before deploying dashboard catalogs:
+
+```bash
+bash configure-hermes-skills.sh
+```
+
+The script installs only selected skills from the official catalog, preserves
+existing local skills, disables known irrelevant or unsafe entries, and runs a
+deep audit. Public GitHub catalogs are discovery sources, not trusted install
+sets; inspect and pin a specific skill before adding community code.
 
 ```bash
 export PORTAL_EMAIL='admin@hermes.local'
@@ -57,14 +86,23 @@ bash deploy-canonical-tools.sh
 bash configure-openwebui-providers.sh
 bash deploy-model-catalog.sh
 bash deploy-prompt-library.sh
+bash deploy-openwebui-resources.sh
 bash validate-model-catalog.sh
 ```
 
 Each deployment wrapper creates a timestamped database backup under `~/hermes-backups`.
 
+`deploy-openwebui-resources.sh` creates or updates five reviewed Markdown
+skills, uploads the three non-sensitive operating documents into the
+`Hermes System Guide` knowledge base, binds each resource only to the relevant
+workspace models, and validates the resulting counts and bindings. It is
+idempotent and does not restart Open WebUI. Personal health, legal, and private
+profile records stay in Hermes' local FTS index and are not uploaded to Open
+WebUI.
+
 ## Model Routing
 
-Cloud routing is stored in `~/.hermes/config.yaml` and provider secrets remain in the Compose environment or persistent Hermes environment. Run `bash configure-hermes-runtime.sh` after adding provider keys. With all current credentials configured, the automatic order is NaraRouter Mistral, Ollama Cloud `gpt-oss:20b`, OpenRouter Nemotron, local GPU Qwen as the fourth overall route, NaraRouter Laguna S 2.1, OpenRouter's free router, and Gemini 2.5 Flash. A provider is omitted when its credential is unavailable. Ollama Cloud is never inserted without working authentication. The removed NaraRouter `glm-5.2-free` identifier must not be restored: its live endpoint returned HTTP 404 on July 25, 2026.
+Cloud routing is stored in `~/.hermes/config.yaml` and provider secrets remain in the Compose environment or persistent Hermes environment. Run `bash configure-hermes-runtime.sh` after adding provider keys. With all current healthy credentials configured, the automatic order is Ollama Cloud `gpt-oss:20b`, OpenRouter `inclusionai/ling-3.0-flash:free`, OpenRouter's `openrouter/free` capability router, local GPU Qwen as the fourth overall route, health-enabled NaraRouter routes, and Gemini 2.5 Flash. A provider is omitted when its credential is unavailable or its health gate is disabled. Ollama Cloud is never inserted without working authentication. Nemotron must not be restored without a fresh tool-call test: it returned prose instead of a tool call on July 26, 2026. A fixed Laguna free route was replaced when its upstream provider returned HTTP 429, while `openrouter/free` passed and can select another free tool-capable model. The removed NaraRouter `glm-5.2-free` identifier must not be restored: its live endpoint returned HTTP 404 on July 25, 2026.
 
 `hermes-ollama-bridge` is private to the Compose network. It converts Hermes'
 OpenAI-compatible requests to Ollama's native `/api/chat`, including streaming

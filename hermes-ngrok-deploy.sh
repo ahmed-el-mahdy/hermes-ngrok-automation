@@ -96,6 +96,7 @@ install -m 0755 "$SOURCE_DIR/ollama-openai-bridge.py" "$PROJECT_DIR/ollama-opena
 install -m 0755 "$SOURCE_DIR/hermes-admin.py" "$PROJECT_DIR/hermes-admin.py"
 install -m 0755 "$SOURCE_DIR/configure-hermes-runtime.py" "$PROJECT_DIR/configure-hermes-runtime.py"
 install -m 0755 "$SOURCE_DIR/configure-hermes-runtime.sh" "$PROJECT_DIR/configure-hermes-runtime.sh"
+install -m 0755 "$SOURCE_DIR/configure-hermes-skills.sh" "$PROJECT_DIR/configure-hermes-skills.sh"
 install -m 0755 "$SOURCE_DIR/hermes-smoke-test.sh" "$PROJECT_DIR/hermes-smoke-test.sh"
 install -m 0755 "$SOURCE_DIR/validate-hermes-runtime.py" "$PROJECT_DIR/validate-hermes-runtime.py"
 install -m 0755 "$SOURCE_DIR/validate-telegram.py" "$PROJECT_DIR/validate-telegram.py"
@@ -105,8 +106,18 @@ install -m 0755 "$SOURCE_DIR/validate-telegram-media.py" "$PROJECT_DIR/validate-
 install -m 0755 "$SOURCE_DIR/validate-open-webui-mobile.py" "$PROJECT_DIR/validate-open-webui-mobile.py"
 install -m 0755 "$SOURCE_DIR/validate-automatic-failover.sh" "$PROJECT_DIR/validate-automatic-failover.sh"
 install -m 0755 "$SOURCE_DIR/validate-delegation-failover.sh" "$PROJECT_DIR/validate-delegation-failover.sh"
+install -m 0755 "$SOURCE_DIR/deploy-openwebui-resources.py" "$PROJECT_DIR/deploy-openwebui-resources.py"
+install -m 0755 "$SOURCE_DIR/deploy-openwebui-resources.sh" "$PROJECT_DIR/deploy-openwebui-resources.sh"
 install -m 0755 "$SOURCE_DIR/scripts/monitor_gold.py" "$PROJECT_DIR/scripts/monitor_gold.py"
 install -m 0644 "$SOURCE_DIR/Dockerfile.open-webui" "$PROJECT_DIR/Dockerfile.open-webui"
+install -d -m 0755 "$PROJECT_DIR/openwebui-skills"
+install -m 0644 "$SOURCE_DIR"/openwebui-skills/*.md "$PROJECT_DIR/openwebui-skills/"
+install -d -m 0755 "$PROJECT_DIR/docs"
+install -m 0644 "$SOURCE_DIR/docs/CAPABILITY_BASELINE.md" "$PROJECT_DIR/docs/CAPABILITY_BASELINE.md"
+install -m 0644 "$SOURCE_DIR/docs/DEPLOYMENT_GUIDE.md" "$PROJECT_DIR/docs/DEPLOYMENT_GUIDE.md"
+install -m 0644 \
+  "$SOURCE_DIR/docs/HERMES_CAPABILITY_AUDIT_2026-07-26.md" \
+  "$PROJECT_DIR/docs/HERMES_CAPABILITY_AUDIT_2026-07-26.md"
 
 if [[ ! -f "$ENV_FILE" ]]; then
   read -r -s -p "ngrok auth token: " NGROK_AUTHTOKEN
@@ -181,6 +192,9 @@ if [[ "$existing_agent" -eq 0 ]]; then
   info "Applying the durable Hermes runtime profile"
   HERMES_PROJECT_DIR="$PROJECT_DIR" bash "$PROJECT_DIR/configure-hermes-runtime.sh"
 fi
+
+info "Applying the reviewed Hermes skill profile"
+bash "$PROJECT_DIR/configure-hermes-skills.sh"
 
 for _ in $(seq 1 60); do
   health="$(docker inspect hermes-open-webui --format '{{.State.Health.Status}}' 2>/dev/null || true)"

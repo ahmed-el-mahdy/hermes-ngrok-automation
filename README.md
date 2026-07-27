@@ -110,17 +110,17 @@ Container recreation does not remove these locations. Do not use `docker compose
 The validated automatic cloud routing policy inside Hermes is:
 
 1. `gpt-oss:20b` through Ollama Cloud when `OLLAMA_API_KEY` is configured
-2. `nvidia/nemotron-3-super-120b-a12b:free` through OpenRouter
-3. `openrouter/free`
+2. `inclusionai/ling-3.0-flash:free` through OpenRouter
+3. `openrouter/free`, which filters for available free tool-capable models
 4. `qwen3-4b-gpu:latest` through the local Ollama bridge
 5. `mistral-large` through NaraRouter when health-enabled
 6. `laguna-s-2.1` through NaraRouter when health-enabled
 7. `gemini-2.5-flash`
 
-Ollama Cloud GPT-OSS, OpenRouter Nemotron, and local Qwen were live-tested with tool calling. The first three positions consume independent free cloud routes before local Qwen takes the fourth overall position. `glm-5.2-free` was removed after its live endpoint returned HTTP 404. Set `NARAROUTER_ENABLED=false` when NaraRouter returns an account gate such as `telegram_required`; this retains the credential and provider entry but removes its models from active routing until a fresh probe succeeds. Ollama Cloud uses its low-usage `gpt-oss:20b` model to stretch the rolling session and weekly allowance; OpenRouter is an additional independent route but its free account allowance is much smaller. The private `hermes-ollama-bridge` translates Hermes OpenAI-wire requests to Ollama's reliable native `/api/chat` endpoint; it is not exposed on the host or through ngrok. All auxiliary tasks use `provider: auto` and inherit the same failover chain instead of being pinned to Gemini. Open WebUI also keeps its direct native Ollama connection and publishes the local model separately as `hermes-local-gpu`. Provider credentials are runtime secrets and must never be committed.
+Ollama Cloud GPT-OSS, OpenRouter Ling, OpenRouter's free capability router, and local Qwen were live-tested with tool calling. The first three positions consume free cloud routes before local Qwen takes the fourth overall position. Nemotron was removed after returning prose instead of the required tool call in a live validation. A fixed Laguna free route was replaced after its upstream provider rate-limited, while the free router passed the same tool-call test. `glm-5.2-free` was removed after its live endpoint returned HTTP 404. Set `NARAROUTER_ENABLED=false` when NaraRouter returns an account gate such as `telegram_required`; this retains the credential and provider entry but removes its models from active routing until a fresh probe succeeds. Ollama Cloud uses its low-usage `gpt-oss:20b` model to stretch the rolling session and weekly allowance; both OpenRouter routes share the OpenRouter account allowance. The private `hermes-ollama-bridge` translates Hermes OpenAI-wire requests to Ollama's reliable native `/api/chat` endpoint; it is not exposed on the host or through ngrok. All auxiliary tasks use `provider: auto` and inherit the same failover chain instead of being pinned to Gemini. Open WebUI also keeps its direct native Ollama connection and publishes the local model separately as `hermes-local-gpu`. Provider credentials are runtime secrets and must never be committed.
 
 Delegated workers use Ollama Cloud `gpt-oss:20b` when it is configured and
-inherit the same fallback chain, including the two independent OpenRouter
+inherit the same fallback chain, including the two tested OpenRouter
 routes before local GPU Qwen. Without Ollama Cloud they run locally from the
 start. Delegation is serialized to one child at a time to protect provider
 request quotas and GPU capacity; each child has 20 iterations and a ten-minute
@@ -169,7 +169,16 @@ After Ollama is reachable, configure the two supported portal connections and pu
 ```bash
 OLLAMA_BASE_URL='http://192.168.1.2:11434' bash configure-openwebui-providers.sh
 PORTAL_EMAIL='admin@hermes.local' PORTAL_PASSWORD='...' bash deploy-model-catalog.sh
+PORTAL_EMAIL='admin@hermes.local' PORTAL_PASSWORD='...' bash deploy-openwebui-resources.sh
 ```
+
+Open WebUI receives one non-sensitive `Hermes System Guide` knowledge base and
+five reusable Markdown skills. The system guide is attached only to HERMES,
+ORCHESTRATOR, and COORDINATOR. Execution, research, personal-advisory, and
+document-analysis skills are attached only to the relevant model presets;
+Egyptian real-estate analysis remains optional through the `$` skill picker.
+Private health, legal, and personal dossiers remain in Hermes' local indexed
+memory and are never copied into the Open WebUI knowledge base.
 
 Apply the routing policy and runtime hardening without putting keys in the repository:
 
@@ -205,12 +214,31 @@ Changes selected with `hermes-admin use` apply to new sessions.
 
 `configure-hermes-runtime.sh` fixes persistent cache ownership, applies the resilient cloud/local failover policy, and installs a shell profile that exposes `hermes`, `hermes-admin`, `pip`, and `uv` to agent terminal sessions. Python packages installed with `pip` persist under `/opt/data/python-packages`.
 
+`configure-hermes-skills.sh` installs a small reviewed set from Hermes' official
+optional catalog: key-free DuckDuckGo search, Excel authoring, flashcards,
+code-wiki generation, and structured decision support. It also disables
+unconfigured or inappropriate skills such as `spotify`, `godmode`, and
+`obliteratus`, then runs Hermes' deep skill audit. Official skills that receive
+a dangerous deep-audit verdict are removed instead of being force-enabled. The
+profile is intentionally curated instead of installing whole public catalogs.
+
 ### Private personal context
 
 Hermes can use a local-only personal archive without sending the entire archive
 to every model call. A concise `USER.md` and `MEMORY.md` load with the session,
 while SQLite FTS5 retrieves only the relevant health, legal, career, finance,
 family, or preference evidence for the current question.
+
+Original images and documents can also be staged under
+`personal-memory/private/attachments/<chat-slug>/`. Routine import is
+Markdown-first: existing attachment extracts are indexed directly, while
+`hermes-personal-ocr --documents-only` extracts embedded text from text,
+DOCX, and PDF files without scanning every image. Use selective local OCR only
+when a specific image is needed, for example
+`hermes-personal-ocr --source health-assistant/report.jpg`. Extraction text,
+method, and confidence stay under the private data volume. Curated dossiers
+rank first, attachment extracts rank second, user chat turns rank third, and
+old assistant turns rank last.
 
 Private exports belong under `personal-memory/private/`, which is excluded from
 Git and the Docker build context. Stage that directory separately on the VM as
@@ -248,6 +276,9 @@ The image includes:
 - Arabic and English OCR with Tesseract
 - HTML parsing with Beautiful Soup and lxml
 - `jq`, `file`, and the Hermes CLI on `PATH`
+
+Image OCR is intentionally opt-in. The original image archive remains private
+and available for targeted visual review without delaying every memory import.
 
 Runtime loop guardrails stop repeated failures, terminal and delegated work have bounded timeouts, and cron runs only one job at a time. OpenRouter requests stop after 60 seconds, silent streams stop after 45 seconds, a complete gateway request stops after five minutes, and a delegated child gets up to ten minutes. The agent policy tells Hermes to use the installed key-free DDGS `web_search` backend and `browser_snapshot` instead of looking for a nonexistent `web-search` skill.
 

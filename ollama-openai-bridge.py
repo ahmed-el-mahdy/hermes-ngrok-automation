@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from typing import Any, AsyncIterator
 from uuid import uuid4
@@ -23,6 +24,16 @@ KEEP_ALIVE = os.environ.get("OLLAMA_KEEP_ALIVE", "24h")
 THINK = os.environ.get("OLLAMA_THINK", "false").lower() in {"1", "true", "yes"}
 
 app = FastAPI(title="Hermes Ollama OpenAI Bridge", docs_url=None, redoc_url=None)
+
+
+def final_content(content: str) -> str:
+    """Remove Qwen reasoning wrappers when local thinking is disabled."""
+    if THINK:
+        return content
+    if "</think>" in content:
+        content = content.rsplit("</think>", 1)[1]
+    content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
+    return content.lstrip()
 
 
 def openai_tool_calls(raw_calls: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
@@ -83,7 +94,7 @@ def completion_response(
     tool_calls = openai_tool_calls(message.get("tool_calls"))
     result_message: dict[str, Any] = {
         "role": "assistant",
-        "content": message.get("content") or "",
+        "content": final_content(message.get("content") or ""),
     }
     if tool_calls:
         result_message["tool_calls"] = tool_calls
@@ -184,6 +195,8 @@ async def stream_completion(
                 return
 
             sent_role = False
+            content_buffer = ""
+            reasoning_closed = THINK
             async for line in response.aiter_lines():
                 if not line:
                     continue
@@ -194,12 +207,27 @@ async def stream_completion(
                     delta["role"] = "assistant"
                     sent_role = True
                 if message.get("content"):
-                    delta["content"] = message["content"]
+                    content = message["content"]
+                    if reasoning_closed:
+                        delta["content"] = content
+                    else:
+                        content_buffer += content
+                        if "</think>" in content_buffer:
+                            reasoning_closed = True
+                            cleaned = final_content(content_buffer)
+                            content_buffer = ""
+                            if cleaned:
+                                delta["content"] = cleaned
                 tool_calls = openai_tool_calls(message.get("tool_calls"))
                 if tool_calls:
                     delta["tool_calls"] = tool_calls
                 finish_reason = None
                 if raw.get("done"):
+                    if content_buffer:
+                        cleaned = final_content(content_buffer)
+                        content_buffer = ""
+                        if cleaned:
+                            delta["content"] = cleaned
                     finish_reason = "tool_calls" if tool_calls else "stop"
                 chunk = {
                     "id": request_id,

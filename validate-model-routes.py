@@ -73,6 +73,8 @@ def tool_payload(model: str) -> dict:
 
 checks: dict[str, bool] = {}
 timings: dict[str, float] = {}
+details: dict[str, dict] = {}
+models: dict[str, str] = {}
 timeout = httpx.Timeout(90, connect=10)
 
 with httpx.Client(timeout=timeout) as client:
@@ -95,6 +97,43 @@ with httpx.Client(timeout=timeout) as client:
         .get("tool_calls")
     )
 
+    started = time.monotonic()
+    local_final = client.post(
+        f"{BRIDGE_URL}/v1/chat/completions",
+        json={
+            "model": "qwen3-4b-gpu:latest",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "Answer only with the final answer. Never show reasoning."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": "/no_think\nرد بكلمة تمام فقط",
+                },
+            ],
+            "temperature": 0,
+            "max_tokens": 512,
+        },
+    )
+    timings["local_no_reasoning"] = round(time.monotonic() - started, 2)
+    local_final.raise_for_status()
+    local_content = (
+        local_final.json().get("choices", [{}])[0]
+        .get("message", {})
+        .get("content", "")
+        .strip()
+    )
+    checks["local_no_reasoning"] = (
+        local_content == "تمام" and "</think>" not in local_content
+    )
+    if not checks["local_no_reasoning"]:
+        details["local_no_reasoning"] = {
+            "content_excerpt": local_content[:400],
+        }
+
     nara_key = configured_value("NARAROUTER_API_KEY")
     if nara_key and configured_flag("NARAROUTER_ENABLED"):
         for check_name, model in (
@@ -108,7 +147,13 @@ with httpx.Client(timeout=timeout) as client:
                 json=tool_payload(model),
             )
             timings[check_name] = round(time.monotonic() - started, 2)
-            nara.raise_for_status()
+            if not nara.is_success:
+                checks[check_name] = False
+                details[check_name] = {
+                    "status_code": nara.status_code,
+                    "error_excerpt": nara.text[:400],
+                }
+                continue
             checks[check_name] = bool(
                 nara.json().get("choices", [{}])[0]
                 .get("message", {})
@@ -126,32 +171,62 @@ with httpx.Client(timeout=timeout) as client:
         timings["ollama_cloud_tool_call"] = round(
             time.monotonic() - started, 2
         )
-        ollama_cloud.raise_for_status()
-        checks["ollama_cloud_tool_call"] = bool(
-            ollama_cloud.json().get("choices", [{}])[0]
-            .get("message", {})
-            .get("tool_calls")
-        )
+        if not ollama_cloud.is_success:
+            checks["ollama_cloud_tool_call"] = False
+            details["ollama_cloud_tool_call"] = {
+                "status_code": ollama_cloud.status_code,
+                "error_excerpt": ollama_cloud.text[:400],
+            }
+        else:
+            checks["ollama_cloud_tool_call"] = bool(
+                ollama_cloud.json().get("choices", [{}])[0]
+                .get("message", {})
+                .get("tool_calls")
+            )
 
     openrouter_key = configured_value("OPENROUTER_API_KEY")
     if openrouter_key:
-        started = time.monotonic()
-        openrouter = client.post(
-            OPENROUTER_URL,
-            headers={"Authorization": f"Bearer {openrouter_key}"},
-            json=tool_payload(
-                "nvidia/nemotron-3-super-120b-a12b:free"
-            ),
+        override = configured_value("OPENROUTER_TEST_MODEL")
+        openrouter_routes = (
+            [("openrouter_tool_call", override)]
+            if override
+            else [
+                (
+                    "openrouter_ling_tool_call",
+                    "inclusionai/ling-3.0-flash:free",
+                ),
+                (
+                    "openrouter_free_router_tool_call",
+                    "openrouter/free",
+                ),
+            ]
         )
-        timings["openrouter_tool_call"] = round(
-            time.monotonic() - started, 2
-        )
-        openrouter.raise_for_status()
-        checks["openrouter_tool_call"] = bool(
-            openrouter.json().get("choices", [{}])[0]
-            .get("message", {})
-            .get("tool_calls")
-        )
+        for check_name, openrouter_model in openrouter_routes:
+            models[check_name] = openrouter_model
+            started = time.monotonic()
+            openrouter = client.post(
+                OPENROUTER_URL,
+                headers={"Authorization": f"Bearer {openrouter_key}"},
+                json=tool_payload(openrouter_model),
+            )
+            timings[check_name] = round(time.monotonic() - started, 2)
+            if not openrouter.is_success:
+                checks[check_name] = False
+                details[check_name] = {
+                    "status_code": openrouter.status_code,
+                    "error_excerpt": openrouter.text[:400],
+                }
+                continue
+            openrouter_choice = openrouter.json().get("choices", [{}])[0]
+            openrouter_message = openrouter_choice.get("message", {})
+            checks[check_name] = bool(openrouter_message.get("tool_calls"))
+            if not checks[check_name]:
+                details[check_name] = {
+                    "finish_reason": openrouter_choice.get("finish_reason"),
+                    "content_excerpt": str(
+                        openrouter_message.get("content") or ""
+                    )[:400],
+                }
 
     api_key = configured_value("API_SERVER_KEY")
     if api_key:
@@ -187,6 +262,8 @@ print(
             "check_count": len(checks),
             "failed_checks": failed,
             "checks": checks,
+            "models": models,
+            "failure_details": details,
             "seconds": timings,
         },
         indent=2,

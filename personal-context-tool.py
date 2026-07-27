@@ -86,6 +86,12 @@ PERSONAL_TRIGGER = re.compile(
     "|".join(f"(?:{terms})" for terms in CATEGORY_TERMS.values()),
     re.IGNORECASE,
 )
+DOCUMENT_INTENT = re.compile(
+    r"\b(?:attachment|cv|document|file|memo|memorandum|report|curriculum)\b"
+    r"|(?:الملف|ملف|المرفق|مرفق|المستند|مستند|التقرير|تقرير|"
+    r"المذكرة|مذكرة|المنهج|منهج|السيرة|سيرة)",
+    re.IGNORECASE,
+)
 
 SECRET_PATTERNS = (
     re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b"),
@@ -209,7 +215,11 @@ def normalize_exports(root: Path) -> dict:
             changed += 1
         redactions += payload.count("[REDACTED]")
 
-    for path in sorted(source_dir.glob("*.md")):
+    markdown_paths = [
+        *sorted(source_dir.glob("*.md")),
+        *sorted((root / "attachment_text").rglob("*.md")),
+    ]
+    for path in markdown_paths:
         original = path.read_text(encoding="utf-8")
         normalized, replacements = redact_secrets(fix_mojibake(original))
         if normalized != original:
@@ -219,7 +229,13 @@ def normalize_exports(root: Path) -> dict:
     return {"changed_files": changed, "redaction_markers": redactions}
 
 
-def split_markdown(path: Path, category: str) -> Iterable[dict]:
+def split_markdown(
+    path: Path,
+    category: str,
+    *,
+    priority: int = 100,
+    source: str | None = None,
+) -> Iterable[dict]:
     text = fix_mojibake(path.read_text(encoding="utf-8"))
     title = path.stem
     section = title
@@ -231,8 +247,8 @@ def split_markdown(path: Path, category: str) -> Iterable[dict]:
             for piece in split_text(content):
                 yield {
                     "category": category,
-                    "priority": 100,
-                    "source": f"dossiers/{path.name}",
+                    "priority": priority,
+                    "source": source or f"dossiers/{path.name}",
                     "title": title,
                     "section": section,
                     "content": piece,
@@ -342,6 +358,22 @@ def dossier_category(path: Path) -> str:
     return "profile"
 
 
+def iter_attachment_chunks(root: Path) -> Iterable[dict]:
+    attachment_root = root / "attachment_text"
+    if not attachment_root.exists():
+        return
+    for path in sorted(attachment_root.rglob("*.md")):
+        relative = path.relative_to(attachment_root)
+        slug = relative.parts[0] if len(relative.parts) > 1 else ""
+        category = CHAT_CATEGORY.get(slug, dossier_category(path))
+        yield from split_markdown(
+            path,
+            category,
+            priority=80,
+            source=f"attachment_text/{relative.as_posix()}",
+        )
+
+
 def build_index(root: Path, db_path: Path) -> dict:
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     manifest_path = root / "source_chats" / "manifest.json"
@@ -361,9 +393,17 @@ def build_index(root: Path, db_path: Path) -> dict:
         int(chat.get("attachment_count") or 0) for chat in manifest_chats
     )
     dossier_paths = sorted((root / "dossiers").glob("*.md"))
+    attachment_text_paths = sorted((root / "attachment_text").rglob("*.md"))
+    attachment_binary_paths = [
+        path
+        for path in sorted((root / "attachments").rglob("*"))
+        if path.is_file() and path.name != "manifest.json"
+    ]
     chunks = []
     for path in dossier_paths:
         chunks.extend(split_markdown(path, dossier_category(path)))
+    attachment_chunks = list(iter_attachment_chunks(root))
+    chunks.extend(attachment_chunks)
     chunks.extend(iter_chat_chunks(root))
     if not chunks:
         raise RuntimeError(f"No personal context files found under {root}")
@@ -427,7 +467,19 @@ def build_index(root: Path, db_path: Path) -> dict:
                     str(attachment_reference_count),
                 ),
                 ("dossier_count", str(len(dossier_paths))),
-                ("schema_version", "1"),
+                (
+                    "attachment_binary_file_count",
+                    str(len(attachment_binary_paths)),
+                ),
+                (
+                    "attachment_text_file_count",
+                    str(len(attachment_text_paths)),
+                ),
+                (
+                    "attachment_text_chunk_count",
+                    str(len(attachment_chunks)),
+                ),
+                ("schema_version", "2"),
             ),
         )
         connection.commit()
@@ -446,6 +498,9 @@ def build_index(root: Path, db_path: Path) -> dict:
         "source_turn_count": source_turn_count,
         "attachment_reference_count": attachment_reference_count,
         "dossier_count": len(dossier_paths),
+        "attachment_binary_file_count": len(attachment_binary_paths),
+        "attachment_text_file_count": len(attachment_text_paths),
+        "attachment_text_chunk_count": len(attachment_chunks),
         "categories": categories,
     }
 
@@ -482,6 +537,7 @@ def _search_category(
     expression = fts_query(fix_mojibake(query), category)
     if not expression:
         return []
+    prefer_attachments = bool(DOCUMENT_INTENT.search(fix_mojibake(query)))
     connection = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     try:
@@ -492,12 +548,21 @@ def _search_category(
             FROM chunks
             WHERE chunks MATCH ?
             ORDER BY
+                CASE
+                    WHEN ? = 1 AND source LIKE 'attachment_text/%' THEN 0
+                    ELSE 1
+                END,
                 CASE WHEN category = ? THEN 0 ELSE 1 END,
                 CAST(priority AS INTEGER) DESC,
                 rank
             LIMIT ?
             """,
-            (expression, category, max(limit * 4, limit)),
+            (
+                expression,
+                int(prefer_attachments),
+                category,
+                max(limit * 4, limit),
+            ),
         ).fetchall()
     except sqlite3.OperationalError:
         return []
@@ -658,9 +723,20 @@ def validate(root: Path, db_path: Path) -> dict:
     if len(chat_files) != 5:
         errors.append(f"expected 5 source chats, found {len(chat_files)}")
     dossier_files = sorted((root / "dossiers").glob("*.md"))
+    attachment_text_files = sorted((root / "attachment_text").rglob("*.md"))
+    attachment_binary_files = [
+        path
+        for path in sorted((root / "attachments").rglob("*"))
+        if path.is_file() and path.name != "manifest.json"
+    ]
     if len(dossier_files) < 7:
         errors.append(f"expected at least 7 dossiers, found {len(dossier_files)}")
-    for path in [*source_files, *dossier_files, *(root / "core").glob("*.md")]:
+    for path in [
+        *source_files,
+        *dossier_files,
+        *attachment_text_files,
+        *(root / "core").glob("*.md"),
+    ]:
         text = path.read_text(encoding="utf-8")
         for pattern in SECRET_PATTERNS:
             if pattern.search(text):
@@ -678,6 +754,16 @@ def validate(root: Path, db_path: Path) -> dict:
         errors.append("personal context database does not contain all 5 chats")
     if metadata.get("source_turn_count") not in {None, "99"}:
         errors.append("personal context database does not contain all 99 turns")
+    if metadata.get("attachment_text_file_count") not in {
+        None,
+        str(len(attachment_text_files)),
+    }:
+        errors.append("attachment text file count does not match the index")
+    if metadata.get("attachment_binary_file_count") not in {
+        None,
+        str(len(attachment_binary_files)),
+    }:
+        errors.append("attachment binary file count does not match the index")
     for name, maximum in (("USER.md", 8000), ("MEMORY.md", 5000)):
         path = root / "core" / name
         if not path.exists():
@@ -689,6 +775,8 @@ def validate(root: Path, db_path: Path) -> dict:
         "errors": errors,
         "source_chat_count": len(chat_files),
         "dossier_count": len(dossier_files),
+        "attachment_binary_file_count": len(attachment_binary_files),
+        "attachment_text_file_count": len(attachment_text_files),
         "database": database_stats,
     }
     return result

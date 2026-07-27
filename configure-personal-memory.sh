@@ -35,6 +35,12 @@ run_personal_tool() {
     "$IMAGE" "$@"
 }
 
+docker run --rm \
+  --user 10000:10000 \
+  --entrypoint /usr/local/bin/hermes-personal-ocr \
+  -v "$DATA_DIR:/opt/data" \
+  "$IMAGE" --documents-only
+
 run_personal_tool normalize
 run_personal_tool build
 run_personal_tool sync-core

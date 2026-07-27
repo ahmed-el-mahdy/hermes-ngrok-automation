@@ -46,6 +46,36 @@ CASES = (
         "local_terms": ("03-health.md", "04-legal.md", "Vitamin D", "979"),
         "answer_terms": ("فيتامين", "Vitamin", "979", "الخبير"),
     },
+    {
+        "name": "legal_attachment",
+        "prompt": "What does the final expert memorandum for case 979 say?",
+        "local_terms": (
+            "attachment_text/legal-consultant/",
+            "case-979-final-expert-memo.md",
+            "979",
+        ),
+        "answer_terms": ("979", "memorandum"),
+    },
+    {
+        "name": "career_attachment",
+        "prompt": "What are the details in my latest merged CV?",
+        "local_terms": (
+            "attachment_text/cv-update-request/",
+            "latest-merged-cv.md",
+            "DevOps",
+        ),
+        "answer_terms": ("DevOps", "Azure", "Kubernetes", "Terraform"),
+    },
+    {
+        "name": "training_attachment",
+        "prompt": "What is the full AI training curriculum and course context?",
+        "local_terms": (
+            "attachment_text/ai-training-review/",
+            "curriculum-full.md",
+            "12",
+        ),
+        "answer_terms": ("12", "curriculum", "training", "AI"),
+    },
 )
 
 BLANKET_REFUSALS = (

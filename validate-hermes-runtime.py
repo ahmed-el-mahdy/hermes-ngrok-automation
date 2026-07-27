@@ -54,8 +54,10 @@ def configured_flag(name: str, default: bool = True) -> bool:
 
 COMMANDS = (
     "file",
+    "ffmpeg",
     "hermes",
     "hermes-admin",
+    "hermes-personal-ocr",
     "hermes-personal-memory",
     "hermes-smoke-test",
     "jq",
@@ -127,10 +129,13 @@ if (
 ):
     expected_first_fallback = (
         "openrouter",
-        "nvidia/nemotron-3-super-120b-a12b:free",
+        "inclusionai/ling-3.0-flash:free",
     )
 elif configured("OPENROUTER_API_KEY"):
-    expected_first_fallback = ("openrouter", "openrouter/free")
+    expected_first_fallback = (
+        "openrouter",
+        "openrouter/free",
+    )
 else:
     expected_first_fallback = ("ollama-local", "qwen3-4b-gpu:latest")
 checks["preferred_first_fallback"] = bool(
@@ -155,7 +160,7 @@ if (
     checks["independent_free_clouds_before_local"] = (
         fallbacks[0].get("provider") == "openrouter"
         and fallbacks[0].get("model")
-        == "nvidia/nemotron-3-super-120b-a12b:free"
+        == "inclusionai/ling-3.0-flash:free"
         and fallbacks[1].get("provider") == "openrouter"
         and fallbacks[1].get("model") == "openrouter/free"
     )
