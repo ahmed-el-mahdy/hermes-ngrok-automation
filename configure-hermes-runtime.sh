@@ -60,8 +60,8 @@ docker exec -u root hermes-agent sh -lc '
     /opt/data/cache/pytest \
     /opt/data/cache/uv \
     /opt/data/cache/huggingface \
-    /opt/data/home/.hermes/scripts \
-    /opt/data/home/.hermes/state \
+    /opt/data/scripts \
+    /opt/data/state \
     /opt/data/python-packages \
     /opt/data/tmp
   chown -R 10000:10000 \
@@ -109,16 +109,27 @@ EOF
   chmod 0640 /opt/data/home/.hermes_env
 
   /opt/hermes/.venv/bin/python /tmp/configure-hermes-runtime.py
+  if [ -f /opt/data/home/.hermes/state/gold-price.json ] \
+    && [ ! -f /opt/data/state/gold-price.json ]; then
+    cp /opt/data/home/.hermes/state/gold-price.json \
+      /opt/data/state/gold-price.json
+    chown 10000:10000 /opt/data/state/gold-price.json
+    chmod 0640 /opt/data/state/gold-price.json
+  fi
   install -o 10000 -g 10000 -m 0750 /tmp/monitor_gold.py \
+    /opt/data/scripts/monitor_gold.py
+  install -d -o 10000 -g 10000 -m 0750 /opt/data/home/.hermes/scripts
+  ln -sf /opt/data/scripts/monitor_gold.py \
     /opt/data/home/.hermes/scripts/monitor_gold.py
-  rm -f /opt/data/scripts/monitor_gold.py \
-    /tmp/configure-hermes-runtime.py /tmp/monitor_gold.py
+  chown -h 10000:10000 /opt/data/home/.hermes/scripts/monitor_gold.py
+  chown -R 10000:10000 /opt/data/state
+  rm -f /tmp/configure-hermes-runtime.py /tmp/monitor_gold.py
   chown 10000:10000 /opt/data/config.yaml
   chmod 0640 /opt/data/config.yaml
 '
 
-if ! docker exec hermes-agent /opt/hermes/.venv/bin/python \
-  /opt/data/home/.hermes/scripts/monitor_gold.py --always-report; then
+if ! docker exec -u 10000 hermes-agent /opt/hermes/.venv/bin/python \
+  /opt/data/scripts/monitor_gold.py --always-report; then
   echo "WARNING: runtime configured, but the external gold feeds were unavailable" >&2
 fi
 

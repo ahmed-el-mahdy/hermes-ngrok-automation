@@ -199,7 +199,7 @@ Do not change ownership of `/opt/hermes` or run the complete upstream test suite
 
 `iteration X/Y` is the agent loop count, not the number of tests. Read `passed_count/check_count` from the smoke output. Telegram status falls back to a recent secret-free live-health record when terminal secret scrubbing removes the bot token from the test process.
 
-The gold monitor lives at `~/.hermes/scripts/monitor_gold.py`; cron must reference only `monitor_gold.py`, not an absolute path. Its 21K value is an indicative global spot conversion and excludes dealer margins and workmanship.
+The metals monitor lives at `$HERMES_HOME/scripts/monitor_gold.py`; cron must reference only `monitor_gold.py`, not an absolute path, and must use no-agent mode. It cross-checks three key-free data routes, reports indicative 21K gold and 999 silver prices, and labels cached readings when every live source is unavailable. This prevents provider or tool-loop failures from turning into fabricated successful cron reports. The values are global spot conversions and exclude dealer margins and workmanship.
 
 ## Local Ollama Model
 

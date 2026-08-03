@@ -454,8 +454,35 @@ checks["quota_report"] = (
 checks["pip_wrapper"] = "pip " in run("pip", "--version").lower()
 checks["user_hermes_link"] = Path("/opt/data/.local/bin/hermes").is_symlink()
 checks["gold_monitor_installed"] = Path(
-    "/opt/data/home/.hermes/scripts/monitor_gold.py"
+    "/opt/data/scripts/monitor_gold.py"
 ).is_file()
+cron_jobs_path = Path("/opt/data/cron/jobs.json")
+try:
+    cron_jobs = json.loads(cron_jobs_path.read_text(encoding="utf-8")).get(
+        "jobs", []
+    )
+except (OSError, json.JSONDecodeError):
+    cron_jobs = []
+active_metals_jobs = [
+    job
+    for job in cron_jobs
+    if job.get("enabled")
+    and (
+        job.get("script") == "monitor_gold.py"
+        or "gold" in str(job.get("name", "")).lower()
+        or "metals" in str(job.get("name", "")).lower()
+    )
+]
+checks["gold_monitor_single_active_cron"] = len(active_metals_jobs) == 1
+checks["gold_monitor_no_agent"] = bool(active_metals_jobs) and bool(
+    active_metals_jobs[0].get("no_agent")
+)
+checks["gold_monitor_delivery"] = bool(active_metals_jobs) and (
+    active_metals_jobs[0].get("deliver") == "origin"
+)
+checks["gold_monitor_state_writable"] = os.access(
+    "/opt/data/state", os.W_OK
+)
 try:
     node_module = run(
         "node",

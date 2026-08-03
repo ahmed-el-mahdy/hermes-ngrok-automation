@@ -76,10 +76,12 @@ tool calls, without exposing another host port.
 
 ## Acceptance Evidence
 
-- Hermes runtime smoke test: 100 of 100 checks passed with live web validation,
+- Hermes runtime smoke test: 104 of 104 checks passed with live web validation,
   including the quota report, PowerPoint create/extract/render pipeline, and the
   default Telegram delivery target
-- Runtime configuration validation: 99 of 99 checks passed
+- Runtime configuration validation: 103 of 103 checks passed, including a
+  single active direct-delivery metals cron job, no-agent execution, writable
+  state, and Telegram delivery configuration
 - Telegram live validation: 3 of 3 checks passed
 - Open WebUI model catalog: 11 of 11 models returned successful responses
 - Independent model routes: 7 of 7 checks passed, including primary gateway,

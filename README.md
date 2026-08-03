@@ -298,7 +298,7 @@ Gateway progress such as `iteration 1/20` means the agent completed its first to
 
 ### Gold Monitor
 
-The daily cron script is installed at `~/.hermes/scripts/monitor_gold.py`. It reads live XAU/USD and USD/EGP JSON feeds, calculates an indicative 21K EGP price, stores an atomic history under `~/.hermes/state`, and alerts only when the configured percentage is crossed. The result excludes Egyptian dealer margin and workmanship, so it must be confirmed locally before a purchase.
+The daily cron script is installed at `$HERMES_HOME/scripts/monitor_gold.py` and runs in no-agent mode. It cross-checks three key-free routes for XAU, XAG, and USD/EGP, calculates indicative 21K gold and 999 silver prices, and stores an atomic history under `$HERMES_HOME/state`. When every live source is unavailable it reports a clearly labelled recent cached reading instead of letting an LLM invent success. The result excludes Egyptian dealer margin and workmanship, so it must be confirmed locally before a purchase.
 
 ## Canonical Tools
 
