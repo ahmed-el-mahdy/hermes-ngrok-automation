@@ -9,6 +9,21 @@ The custom dashboard image is pinned to Open WebUI `v0.10.2` and adds Node.js fo
 
 ## Architecture
 
+```mermaid
+flowchart LR
+  Browser["User browser"] --> Ngrok["ngrok HTTPS"]
+  Ngrok --> UI["Authenticated Open WebUI"]
+  UI --> Agent["Private Hermes API"]
+  Agent --> Cloud["Configured provider routing"]
+  Agent --> Bridge["Private Ollama compatibility bridge"]
+  Bridge --> Local["Approved local Ollama endpoint"]
+  UI --> Store["Persistent UI data"]
+  Agent --> Memory["Private local agent memory"]
+  Trusted["Trusted LAN or VPN administrator"] -.-> Dashboard["Authenticated native dashboard"]
+```
+
+Documentation review: 30 October 2026, refreshed from the existing remote branch before editing. The flow above distinguishes public UI access from private API/model/memory paths. The detailed commands and recorded tests below are retained operational history, not proof that every endpoint/provider is currently available. Revalidate routing, authentication, backup restore and permission boundaries after an upgrade.
+
 ```text
 Browser
   -> ngrok HTTPS endpoint -> Open WebUI :8080
@@ -39,6 +54,10 @@ publish that password-only dashboard directly to the public internet; use
 Nous OAuth or a self-hosted OIDC provider for an internet-facing deployment.
 
 ## Dashboard Access
+
+Keep raw conversations, private memory, provider keys, personal attachments and application databases out of Git. A local agent on another laptop is not automatically synchronized with this checkout. Prefer a selective approved summary when moving career lessons; a failing search index is not permission to repair or export the whole live history.
+
+Personal reference: [career/project map](https://github.com/ahmed-el-mahdy/Career-Advance#personal-repository-reference-map). This is a personal automation and operations project, separate from employer production infrastructure.
 
 The deployment exposes two distinct interfaces:
 
